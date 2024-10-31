@@ -1,0 +1,21 @@
+FROM python:3.11-bookworm
+
+RUN apt-get update && \
+    apt-get install -yq tzdata && \
+    ln -fs /usr/share/zoneinfo/America/Caracas /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata
+
+RUN pip install pipenv
+
+ADD . /app
+
+WORKDIR /app
+
+RUN pip install -r requirements.txt
+
+RUN pip install gunicorn[gevent]
+
+EXPOSE 3000
+
+RUN chmod +x start_service.sh
+CMD ["bash", "./start_service.sh"]
