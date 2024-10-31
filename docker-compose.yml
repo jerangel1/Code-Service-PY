@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: deployment/image/Dockerfile_api
     ports:
-      - "3000:3000"
+      - "8000:8000"
     volumes:
       - .:/app
     environment:
