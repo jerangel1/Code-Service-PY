@@ -1,5 +1,9 @@
 FROM python:3.11-bookworm
 
+# Configurar variables de entorno para logging
+ENV PYTHONUNBUFFERED=1
+ENV LOG_LEVEL=DEBUG
+
 RUN apt-get update && \
     apt-get install -yq tzdata && \
     ln -fs /usr/share/zoneinfo/America/Caracas /etc/localtime && \
@@ -7,15 +11,32 @@ RUN apt-get update && \
 
 RUN pip install pipenv
 
-ADD . /app
-
+# Crear y establecer el directorio de trabajo
 WORKDIR /app
 
+# Copiar solo los archivos necesarios primero
+COPY requirements.txt .
 RUN pip install -r requirements.txt
-
 RUN pip install gunicorn[gevent]
+
+# Copiar el resto de la aplicación
+COPY . .
+
+# Asegurarse de que los scripts sean ejecutables
+RUN chmod +x start_service.sh
 
 EXPOSE 8000
 
-RUN chmod +x start_service.sh
+# Modificar el script de inicio para incluir logging
+RUN echo '#!/bin/bash\n\
+echo "Starting service with debug logging..."\n\
+gunicorn main:app \
+    --worker-class gevent \
+    --workers ${WORKERS:-1} \
+    --bind 0.0.0.0:${API_PORT:-8000} \
+    --log-level debug \
+    --access-logfile - \
+    --error-logfile - \
+    --capture-output\n' > start_service.sh
+
 CMD ["bash", "./start_service.sh"]

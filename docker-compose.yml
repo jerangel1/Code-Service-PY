@@ -11,6 +11,9 @@ services:
       - .:/app
     environment:
       - TZ=America/Caracas
+      - PYTHONUNBUFFERED=1  # Importante para ver los logs en tiempo real
+      - LOG_LEVEL=DEBUG     # Nivel de logging
     env_file:
       - .env
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --log-level debug --reload
     restart: always
