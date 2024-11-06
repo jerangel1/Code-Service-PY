@@ -1,5 +1,7 @@
 # Ignore environment variables
 .env
+.env.local
+.env.development
 
 # Ignore Python cache files
 __pycache__/
@@ -12,3 +14,8 @@ env/
 # Ignore IDE/editor specific files
 .vscode/
 .idea/
+
+# Ignore Microsoft credentials
+MS_CLIENT_ID
+MS_CLIENT_SECRET
+MS_TENANT_ID
