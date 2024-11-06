@@ -19,3 +19,4 @@ starlette==0.41.2
 typing_extensions==4.12.2
 uvicorn==0.32.0
 wheel==0.43.0
+O365==2.0.26 
