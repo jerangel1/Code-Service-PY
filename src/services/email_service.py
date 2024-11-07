@@ -50,8 +50,8 @@ class EmailCodeService:
                 }
 
             logger.info(f"📧 Buscando email en DB: {email_address}")
-            
-            
+
+
             # 1. Validar correo en DB
             email_account = self.db.query(EmailAccount).filter(
                 func.lower(EmailAccount.email) == func.lower(email_address)
@@ -68,20 +68,23 @@ class EmailCodeService:
             try:
                 # 2. Configurar conexión OAuth2 usando las credenciales del .env
                 credentials = (self.client_id, self.client_secret)
-                account = Account(credentials, 
-                                auth_flow_type='credentials', 
-                                tenant_id=self.tenant_id)
-                
+                account = Account(
+                    credentials,
+                    auth_flow_type='credentials',
+                    tenant_id=self.tenant_id)
+
                 if account.authenticate():
                     mailbox = account.mailbox()
                     logger.info("✅ Autenticación exitosa con Microsoft")
-                    
+
+
                     # 3. Buscar correos de Netflix (últimas 24 horas)
                     yesterday = datetime.now() - timedelta(days=1)
-                    query = (f"from:info@account.netflix.com "
-                            f"AND received>={yesterday.strftime('%Y-%m-%d')} "
-                            f"AND (subject:'Hogar con Netflix' OR subject:'código')")
-                    
+                    query = (
+                        f"from:info@account.netflix.com "
+                        f"AND received>={yesterday.strftime('%Y-%m-%d')} "
+                        f"AND (subject:'Hogar con Netflix' OR subject:'código')")
+
                     messages = mailbox.get_messages(query=query, limit=10)
                     logger.info("🔍 Buscando correos de Netflix")
                     
@@ -90,9 +93,10 @@ class EmailCodeService:
                         if 'Hogar con Netflix' in message.subject:
                             body = message.get_body_text()
                             soup = BeautifulSoup(body, 'html.parser')
-                            confirm_button = soup.find('a', string=lambda text: 
-                                text and ('Sí, la envié yo' in text or 'Yes, it was me' in text))
-                            
+                            confirm_button = soup.find(
+                                'a', string=lambda text: text and (
+                                    'Sí, la envié yo' in text or 'Yes, it was me' in text))
+
                             if confirm_button:
                                 link = confirm_button.get('href')
                                 logger.info(f"✅ Enlace de confirmación encontrado: {link}")
@@ -102,10 +106,10 @@ class EmailCodeService:
                                     "email": email_address,
                                     "type": "netflix_home"
                                 }
-                        
+
                         # Buscar códigos de verificación
                         elif any(keyword in message.subject.lower() 
-                               for keyword in ['código', 'code', 'verificación']):
+                            for keyword in ['código', 'code', 'verificación']):
                             body = message.get_body_text()
                             code = self.code_extractor.extract_code_from_email(body)
                             if code:
