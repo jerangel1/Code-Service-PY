@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from src.config.database import get_db
 from src.models.email_account import EmailAccount
 from src.services.email_service import EmailCodeService
+from O365 import Account, Connection
 import os
 
 
@@ -30,3 +31,37 @@ async def check_code(email: str, db: Session = Depends(get_db)):
     result = await service.check_email_for_codes(email)
     print(f"DEBUG - Resultado: {result}")
     return result
+
+
+async def test_auth():
+    try:
+        client_id = os.getenv('MS_CLIENT_ID')
+        client_secret = os.getenv('MS_CLIENT_SECRET')
+        tenant_id = os.getenv('MS_TENANT_ID')
+        credentials = (client_id, client_secret)
+        account = Account(
+            credentials,
+            auth_flow_type='credentials',
+            tenant_id=tenant_id)
+
+        if account.authenticate():
+            return {
+                "status": "success",
+                "message": "Autenticación exitosa",
+                "tenant": tenant_id
+            }
+        return {
+            "status": "error",
+            "message": "Fallo en autenticación"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+# Agregar método de prueba en EmailCodeService
+@app.get("/api/test-auth")
+async def test_auth_api():
+    return await test_auth()
+
