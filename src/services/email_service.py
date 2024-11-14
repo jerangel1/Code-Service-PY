@@ -9,8 +9,9 @@ import email
 import re
 from email.header import decode_header
 
-from models.email_account import EmailAccount
-from services.code_extractor import CodeExtractor
+# Corregir las importaciones
+from src.models.email_account import EmailAccount
+from src.services.code_extractor import CodeExtractor
 
 logger = logging.getLogger(__name__)
 
