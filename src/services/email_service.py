@@ -7,9 +7,9 @@ import logging
 import imaplib
 import email
 import re
+import socket
 from email.header import decode_header
 
-# Corregir las importaciones
 from src.models.email_account import EmailAccount
 from src.services.code_extractor import CodeExtractor
 
@@ -24,6 +24,7 @@ class EmailCodeService:
         self.central_email = "serviciosnetplus@gmail.com"
         self.imap_server = "imap.gmail.com"
         self.imap_port = 993
+        self.timeout = 30  # Timeout en segundos
         
         # Obtener contraseña de la DB
         self.central_password = self._get_central_email_password()
@@ -36,7 +37,33 @@ class EmailCodeService:
             'smartservicesnp.com',
             'snp2022.xyz'
         ]
-        
+
+    def _connect_to_imap(self):
+        """Establece conexión con el servidor IMAP con timeout"""
+        try:
+            socket.setdefaulttimeout(self.timeout)
+            mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            mail.login(self.central_email, self.central_password)
+            return mail
+        except socket.timeout:
+            logger.error("Timeout al conectar con Gmail")
+            raise HTTPException(
+                status_code=503,
+                detail="Timeout al conectar con el servidor de correo"
+            )
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Error IMAP: {str(e)}")
+            raise HTTPException(
+                status_code=401,
+                detail="Error de autenticación con Gmail"
+            )
+        except Exception as e:
+            logger.error(f"Error de conexión: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error al conectar con el servidor de correo"
+            )
+
     def _get_central_email_password(self) -> str:
         """Obtiene la contraseña del correo central desde la DB"""
         email_account = self.db.query(EmailAccount).filter(
@@ -47,14 +74,15 @@ class EmailCodeService:
         return email_account.password
 
     async def check_email_for_codes(self, email_address: str) -> dict:
+        mail = None
         try:
             # Validar dominio del correo
             domain = email_address.split('@')[1].lower()
             if domain not in self.authorized_domains:
                 return self._handle_unauthorized_domain(domain)
 
-            mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
-            mail.login(self.central_email, self.central_password)
+            # Conectar a Gmail usando el nuevo método
+            mail = self._connect_to_imap()
             mail.select("INBOX")
 
             # Buscar correos en los últimos 20 minutos
@@ -98,9 +126,6 @@ class EmailCodeService:
                                 "email": email_address,
                                 "type": "verification_code"
                             }
-
-            mail.close()
-            mail.logout()
             
             return {
                 "has_code": False,
@@ -109,9 +134,18 @@ class EmailCodeService:
                 "setup_required": False
             }
 
+        except HTTPException as he:
+            raise he
         except Exception as e:
             logger.error(f"❌ Error general: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            if mail:
+                try:
+                    mail.close()
+                    mail.logout()
+                except:
+                    pass
 
     def _get_email_body(self, email_message) -> str:
         """Extrae el cuerpo del mensaje de correo"""
