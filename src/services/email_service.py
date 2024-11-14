@@ -1,13 +1,16 @@
-from fastapi import HTTPException
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from src.models.email_account import EmailAccount
-from datetime import datetime, timedelta
-from .code_extractor import CodeExtractor
-from bs4 import BeautifulSoup
+from fastapi import HTTPException
 import logging
-import os
-from O365 import Account, Connection
+import imaplib
+import email
+import re
+from email.header import decode_header
+
+from models.email_account import EmailAccount
+from services.code_extractor import CodeExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -15,156 +18,153 @@ class EmailCodeService:
     def __init__(self, db: Session):
         self.db = db
         self.code_extractor = CodeExtractor()
-        self.client_id = os.getenv('MS_CLIENT_ID')
-        self.client_secret = os.getenv('MS_CLIENT_SECRET')
-        self.tenant_id = os.getenv('MS_TENANT_ID')
         
-        # Agregar lista de dominios autorizados
+        # Configuración para Gmail central
+        self.central_email = "serviciosnetplus@gmail.com"
+        self.imap_server = "imap.gmail.com"
+        self.imap_port = 993
+        
+        # Obtener contraseña de la DB
+        self.central_password = self._get_central_email_password()
+        
+        # Dominios autorizados específicos
         self.authorized_domains = [
-            'serviciosnp.com',
+            'netorgft1124943.onmicrosoft.com',
             'nplus600.com',
+            'serviciosnp.com',
             'smartservicesnp.com',
             'snp2022.xyz'
         ]
-    
+        
+    def _get_central_email_password(self) -> str:
+        """Obtiene la contraseña del correo central desde la DB"""
+        email_account = self.db.query(EmailAccount).filter(
+            func.lower(EmailAccount.email) == self.central_email.lower()
+        ).first()
+        if not email_account:
+            raise Exception("Correo central no configurado en la base de datos")
+        return email_account.password
+
     async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             # Validar dominio del correo
             domain = email_address.split('@')[1].lower()
             if domain not in self.authorized_domains:
-                logger.warning(f"❌ Dominio no autorizado: {domain}")
-                return {
-                    "has_code": False,
-                    "message": f"El dominio {domain} no está autorizado",
-                    "setup_required": True,
-                    "setup_instructions": {
-                        "title": "Dominio no configurado en Azure",
-                        "steps": [
-                            "1. Verifica que el dominio esté agregado en Azure",
-                            "2. Completa la configuración DNS del dominio",
-                            "3. Espera a que la verificación se complete (15-30 min)",
-                            "4. Contacta al administrador si el problema persiste"
-                        ],
-                        "contact_support": "support@serviciosnp.com"
-                    }
-                }
+                return self._handle_unauthorized_domain(domain)
 
-            logger.info(f"📧 Buscando email en DB: {email_address}")
+            mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            mail.login(self.central_email, self.central_password)
+            mail.select("INBOX")
 
-
-            # 1. Validar correo en DB
-            email_account = self.db.query(EmailAccount).filter(
-                func.lower(EmailAccount.email) == func.lower(email_address)
-            ).first()
-
-            if not email_account:
-                logger.warning(f"❌ Email no encontrado en DB: {email_address}")
-                return {
-                    "has_code": False,
-                    "message": f"Email {email_address} no encontrado en la base de datos",
-                    "setup_required": False
-                }
-
-            try:
-                # 2. Configurar conexión OAuth2 usando las credenciales del .env
-                credentials = (self.client_id, self.client_secret)
-                account = Account(
-                    credentials,
-                    auth_flow_type='credentials',
-                    tenant_id=self.tenant_id)
-
-                if account.authenticate():
-                    mailbox = account.mailbox()
-                    logger.info("✅ Autenticación exitosa con Microsoft")
-
-
-                    # 3. Buscar correos de Netflix (últimas 24 horas)
-                    yesterday = datetime.now() - timedelta(days=1)
-                    query = (
-                        f"from:info@account.netflix.com "
-                        f"AND received>={yesterday.strftime('%Y-%m-%d')} "
-                        f"AND (subject:'Hogar con Netflix' OR subject:'código')")
-
-                    messages = mailbox.get_messages(query=query, limit=10)
-                    logger.info("🔍 Buscando correos de Netflix")
+            # Buscar correos en los últimos 20 minutos
+            date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y %H:%M:%S")
+            search_criteria = f'(OR (FROM "info@account.netflix.com") (SUBJECT "Fwd: Netflix") (SUBJECT "FW: Netflix")) SINCE "{date}"'
+            
+            _, messages = mail.search(None, search_criteria)
+            
+            for num in messages[0].split():
+                _, msg_data = mail.fetch(num, "(RFC822)")
+                email_body = msg_data[0][1]
+                email_message = email.message_from_bytes(email_body)
+                
+                # Verificar si el correo está relacionado con el dominio solicitado
+                original_sender = self._get_original_sender(email_message)
+                if original_sender and domain in original_sender:
+                    # Procesar el correo según su tipo
+                    if 'Hogar con Netflix' in email_message['subject']:
+                        body = self._get_email_body(email_message)
+                        soup = BeautifulSoup(body, 'html.parser')
+                        confirm_button = soup.find(
+                            'a', string=lambda text: text and (
+                                'Sí, la envié yo' in text or 'Yes, it was me' in text))
+                        
+                        if confirm_button:
+                            link = confirm_button.get('href')
+                            return {
+                                "has_code": True,
+                                "confirmation_link": link,
+                                "email": email_address,
+                                "type": "netflix_home"
+                            }
                     
-                    for message in messages:
-                        # Verificar si es correo de Hogar Netflix
-                        if 'Hogar con Netflix' in message.subject:
-                            body = message.get_body_text()
-                            soup = BeautifulSoup(body, 'html.parser')
-                            confirm_button = soup.find(
-                                'a', string=lambda text: text and (
-                                    'Sí, la envié yo' in text or 'Yes, it was me' in text))
+                    elif self._is_relevant_email(email_message):
+                        body = self._get_email_body(email_message)
+                        code = self.code_extractor.extract_code_from_email(body)
+                        if code:
+                            return {
+                                "has_code": True,
+                                "code": code,
+                                "email": email_address,
+                                "type": "verification_code"
+                            }
 
-                            if confirm_button:
-                                link = confirm_button.get('href')
-                                logger.info(f"✅ Enlace de confirmación encontrado: {link}")
-                                return {
-                                    "has_code": True,
-                                    "confirmation_link": link,
-                                    "email": email_address,
-                                    "type": "netflix_home"
-                                }
-
-                        # Buscar códigos de verificación
-                        elif any(keyword in message.subject.lower() 
-                            for keyword in ['código', 'code', 'verificación']):
-                            body = message.get_body_text()
-                            code = self.code_extractor.extract_code_from_email(body)
-                            if code:
-                                logger.info(f"✅ Código encontrado: {code}")
-                                return {
-                                    "has_code": True,
-                                    "code": code,
-                                    "email": email_address,
-                                    "type": "verification_code"
-                                }
-
-                    logger.info("ℹ️ No se encontraron códigos o solicitudes")
-                    return {
-                        "has_code": False,
-                        "message": "No se encontraron códigos o solicitudes pendientes",
-                        "email": email_address,
-                        "setup_required": False
-                    }
-                else:
-                    logger.error("❌ Error de autenticación con Microsoft")
-                    return self._handle_auth_error("No se pudo autenticar")
-
-            except Exception as e:
-                logger.error(f"❌ Error accediendo al correo: {str(e)}")
-                return self._handle_auth_error(str(e))
+            mail.close()
+            mail.logout()
+            
+            return {
+                "has_code": False,
+                "message": "No se encontraron códigos o solicitudes pendientes",
+                "email": email_address,
+                "setup_required": False
+            }
 
         except Exception as e:
             logger.error(f"❌ Error general: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    def _is_relevant_email(self, message) -> bool:
-        """Verifica si el correo es relevante para códigos."""
-        subject = message.subject.lower()
-        return any(keyword in subject for keyword in [
-            'código', 
-            'verificación', 
-            'verification', 
-            'code',
-            'acceso',
-            'access'
-        ])
+    def _get_email_body(self, email_message) -> str:
+        """Extrae el cuerpo del mensaje de correo"""
+        if email_message.is_multipart():
+            for part in email_message.walk():
+                if part.get_content_type() == "text/html":
+                    return part.get_payload(decode=True).decode()
+        else:
+            return email_message.get_payload(decode=True).decode()
 
-    def _handle_auth_error(self, error_msg: str) -> dict:
+    def _get_original_sender(self, email_message) -> str:
+        """Extrae el remitente original de un correo reenviado"""
+        try:
+            # Buscar en headers de reenvío
+            for header in ['Original-From', 'From']:
+                if header in email_message:
+                    return email_message[header]
+            
+            # Buscar en el cuerpo del mensaje
+            body = self._get_email_body(email_message)
+            if body:
+                patterns = [
+                    r'From:\s*([^\n]+)',
+                    r'De:\s*([^\n]+)',
+                    r'Sender:\s*([^\n]+)'
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, body)
+                    if match:
+                        return match.group(1)
+            return None
+        except Exception as e:
+            logger.error(f"Error extrayendo remitente original: {str(e)}")
+            return None
+
+    def _is_relevant_email(self, email_message) -> bool:
+        """Verifica si el correo es relevante para la extracción de códigos"""
+        subject = email_message['subject'].lower()
+        relevant_subjects = [
+            'código de verificación',
+            'verification code',
+            'código netflix',
+            'netflix code',
+            'fwd: netflix',
+            'fw: netflix',
+            'hogar con netflix'
+        ]
+        return any(text in subject for text in relevant_subjects)
+
+    def _handle_unauthorized_domain(self, domain: str) -> dict:
+        """Maneja el caso de dominio no autorizado"""
         return {
             "has_code": False,
-            "message": "Error de autenticación con Microsoft",
-            "setup_required": True,
-            "setup_instructions": {
-                "title": "Verifica la configuración de Microsoft",
-                "steps": [
-                    "1. Verifica que las credenciales en .env sean correctas",
-                    "2. Asegúrate que los permisos estén concedidos en Azure",
-                    "3. Verifica que el tenant_id sea el correcto"
-                ],
-                "error": str(error_msg),
-                "contact_support": "support@serviciosnp.com"
-            }
+            "message": f"El dominio {domain} no está autorizado",
+            "email": None,
+            "setup_required": True
         }
