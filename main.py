@@ -1,12 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+import imaplib
+import os
+
 from src.config.database import get_db
 from src.models.email_account import EmailAccount
 from src.services.email_service import EmailCodeService
-from O365 import Account, Connection
-import os
-
 
 app = FastAPI()
 
@@ -14,9 +14,9 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS"),
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Especificamos los métodos
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["*"],  # Agregamos headers expuestos
+    expose_headers=["*"],
     max_age=3600,
 )
 
@@ -26,42 +26,33 @@ async def root():
 
 @app.get("/api/check-code/{email}")
 async def check_code(email: str, db: Session = Depends(get_db)):
+    """Endpoint para buscar códigos de verificación"""
     print(f"DEBUG - Endpoint llamado con email: {email}")
     service = EmailCodeService(db)
     result = await service.check_email_for_codes(email)
     print(f"DEBUG - Resultado: {result}")
     return result
 
-
-async def test_auth():
+@app.get("/api/test-auth")
+async def test_auth(db: Session = Depends(get_db)):
+    """Endpoint para probar la conexión al correo central"""
     try:
-        client_id = os.getenv('MS_CLIENT_ID')
-        client_secret = os.getenv('MS_CLIENT_SECRET')
-        tenant_id = os.getenv('MS_TENANT_ID')
-        credentials = (client_id, client_secret)
-        account = Account(
-            credentials,
-            auth_flow_type='credentials',
-            tenant_id=tenant_id)
-
-        if account.authenticate():
-            return {
-                "status": "success",
-                "message": "Autenticación exitosa",
-                "tenant": tenant_id
-            }
+        service = EmailCodeService(db)
+        mail = imaplib.IMAP4_SSL(service.imap_server, service.imap_port)
+        mail.login(service.central_email, service.central_password)
+        mail.select("INBOX")
+        
+        # Si la conexión es exitosa, cerrar correctamente
+        mail.close()
+        mail.logout()
+        
         return {
-            "status": "error",
-            "message": "Fallo en autenticación"
+            "status": "success",
+            "message": "Autenticación exitosa con Gmail",
+            "email": service.central_email
         }
     except Exception as e:
         return {
             "status": "error",
-            "message": str(e)
+            "message": f"Error de autenticación: {str(e)}"
         }
-
-# Agregar método de prueba en EmailCodeService
-@app.get("/api/test-auth")
-async def test_auth_api():
-    return await test_auth()
-
