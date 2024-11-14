@@ -39,21 +39,62 @@ async def test_auth(db: Session = Depends(get_db)):
     """Endpoint para probar la conexión al correo central"""
     try:
         service = EmailCodeService(db)
-        mail = imaplib.IMAP4_SSL(service.imap_server, service.imap_port)
-        mail.login(service.central_email, service.central_password)
-        mail.select("INBOX")
         
-        # Si la conexión es exitosa, cerrar correctamente
-        mail.close()
-        mail.logout()
-        
-        return {
-            "status": "success",
-            "message": "Autenticación exitosa con Gmail",
-            "email": service.central_email
-        }
+        # Verificar que existe la configuración básica
+        if not service.central_email or not service.central_password:
+            return {
+                "status": "error",
+                "message": "Falta configuración del correo central en la base de datos"
+            }
+
+        try:
+            # Intentar conexión IMAP
+            mail = imaplib.IMAP4_SSL(service.imap_server, service.imap_port)
+        except Exception as imap_error:
+            return {
+                "status": "error",
+                "message": f"Error de conexión IMAP: No se puede conectar al servidor Gmail. Verifique su conexión a internet",
+                "details": str(imap_error)
+            }
+
+        try:
+            # Intentar login
+            mail.login(service.central_email, service.central_password)
+        except imaplib.IMAP4.error as login_error:
+            return {
+                "status": "error",
+                "message": "Error de autenticación: Credenciales incorrectas. Verifique el correo y la contraseña",
+                "details": str(login_error)
+            }
+
+        try:
+            # Intentar seleccionar bandeja
+            mail.select("INBOX")
+            
+            # Si todo es exitoso, cerrar correctamente
+            mail.close()
+            mail.logout()
+            
+            return {
+                "status": "success",
+                "message": "Conexión exitosa con Gmail",
+                "email": service.central_email,
+                "details": {
+                    "imap_server": service.imap_server,
+                    "imap_port": service.imap_port,
+                    "inbox_access": True
+                }
+            }
+        except Exception as inbox_error:
+            return {
+                "status": "error",
+                "message": "Error accediendo al buzón de entrada",
+                "details": str(inbox_error)
+            }
+
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error de autenticación: {str(e)}"
+            "message": "Error general en la configuración del servicio",
+            "details": str(e)
         }
