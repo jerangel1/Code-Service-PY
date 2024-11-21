@@ -13,18 +13,17 @@ from src.services.code_extractor import CodeExtractor
 
 logger = logging.getLogger(__name__)
 
-
 class EmailCodeService:
     def __init__(self, db: Session):
         self.db = db
         self.code_extractor = CodeExtractor()
-
+        
         # Configuración para Gmail central
         self.central_email = "serviciosnetplus@gmail.com"
         self.imap_server = "imap.gmail.com"
         self.imap_port = 993
         self.timeout = 60
-
+        
         self.central_password = getenv('GMAIL_APP_PASSWORD')
         if not self.central_password:
             raise Exception("GMAIL_APP_PASSWORD no está configurado en .env")
@@ -32,15 +31,14 @@ class EmailCodeService:
     def _connect_to_imap(self):
         """Establece conexión con el servidor IMAP con timeout"""
         try:
-            logger.info(f"Intentando conectar a {
-                        self.imap_server}:{self.imap_port}")
+            logger.info(f"Intentando conectar a {self.imap_server}:{self.imap_port}")
             socket.setdefaulttimeout(self.timeout)
             mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
-
+            
             logger.info(f"Intentando login con {self.central_email}")
             mail.login(self.central_email, self.central_password)
             logger.info("Login exitoso")
-
+            
             return mail
         except socket.timeout:
             logger.error("Timeout al conectar con Gmail")
@@ -92,55 +90,51 @@ class EmailCodeService:
         mail = None
         try:
             email_address = email_address.lower()
-
+            
             mail = self._connect_to_imap()
             mail.select("INBOX")
-
+            
             # Buscar correos en los últimos 20 minutos
             date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y")
-            search_criteria = f'(SINCE "{
-                date}" FROM "info@account.netflix.com")'
-
-            logger.info(f"Buscando correos para {
-                        email_address} con criterios: {search_criteria}")
-
+            search_criteria = f'(SINCE "{date}" FROM "info@account.netflix.com")'
+            
+            logger.info(f"Buscando correos para {email_address} con criterios: {search_criteria}")
+            
             try:
                 _, messages = mail.search(None, search_criteria)
-
+                
                 if not messages[0]:
-                    logger.info(f"No se encontraron mensajes para {
-                                email_address}")
+                    logger.info(f"No se encontraron mensajes para {email_address}")
                     return {
                         "has_code": False,
                         "message": "No se encontraron códigos pendientes",
                         "email": email_address,
                         "timestamp": datetime.now().isoformat()
                     }
-
+                
                 for num in messages[0].split():
                     _, msg_data = mail.fetch(num, "(RFC822)")
                     email_body = msg_data[0][1]
                     email_message = email.message_from_bytes(email_body)
-
+                    
                     to_address = self._get_recipient_email(email_message)
                     logger.info(f"Comparando {to_address} con {email_address}")
-
+                    
                     if to_address and to_address == email_address:
                         body = self._get_email_body(email_message)
                         soup = BeautifulSoup(body, 'html.parser')
-
+                        
                         # Buscar botón "Obtener código"
                         get_code_button = soup.find(
                             'a',
-                            class_=lambda x: x and (
-                                'btn-get-code' in x.lower() or 'button' in x.lower()),
+                            class_=lambda x: x and ('btn-get-code' in x.lower() or 'button' in x.lower()),
                             string=lambda text: text and any(phrase in text for phrase in [
                                 'Obtener código',
                                 'Get code',
                                 'Obtener tu código'
                             ])
                         )
-
+                        
                         if not get_code_button:
                             get_code_button = soup.find(
                                 'a',
@@ -150,27 +144,25 @@ class EmailCodeService:
                                     'Obtener tu código'
                                 ])
                             )
-
+                        
                         if not get_code_button:
                             get_code_button = soup.find(
                                 'a',
                                 style=lambda x: x and 'background-color: #e50914' in x.lower()
                             )
-
+                        
                         if get_code_button:
                             code_url = get_code_button.get('href')
-
+                            
                             if code_url and ('netflix.com/login' in code_url or 'netflix.com/account/travel/verify' in code_url):
-                                logger.info(
-                                    f"✅ URL de código encontrada: {code_url}")
-
+                                logger.info(f"✅ URL de código encontrada: {code_url}")
+                                
                                 message_guid = None
                                 if 'messageGuid' in code_url:
-                                    guid_match = re.search(
-                                        r'messageGuid=([^&]+)', code_url)
+                                    guid_match = re.search(r'messageGuid=([^&]+)', code_url)
                                     if guid_match:
                                         message_guid = guid_match.group(1)
-
+                                
                                 return {
                                     "has_code": True,
                                     "code_url": code_url,
@@ -182,16 +174,15 @@ class EmailCodeService:
                                     "timestamp": datetime.now().isoformat()
                                 }
                             else:
-                                logger.warning(
-                                    f"⚠️ URL no válida encontrada: {code_url}")
-
+                                logger.warning(f"⚠️ URL no válida encontrada: {code_url}")
+                
                 return {
                     "has_code": False,
                     "message": "No se encontraron códigos pendientes",
                     "email": email_address,
                     "timestamp": datetime.now().isoformat()
                 }
-
+                
             except imaplib.IMAP4.error as e:
                 logger.error(f"Error IMAP al buscar mensajes: {str(e)}")
                 raise HTTPException(
@@ -203,7 +194,7 @@ class EmailCodeService:
                         "timestamp": datetime.now().isoformat()
                     }
                 )
-
+                
         except Exception as e:
             logger.error(f"❌ Error general: {str(e)}")
             raise HTTPException(
