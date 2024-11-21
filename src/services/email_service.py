@@ -63,9 +63,10 @@ class EmailCodeService:
                 to_header = decode_header(email_message['To'])[0][0]
                 if isinstance(to_header, bytes):
                     to_header = to_header.decode()
+                # Extraer el email usando regex y convertir a minúsculas
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+', to_header)
                 if email_match:
-                    return email_match.group(0)
+                    return email_match.group(0).lower()  # Convertir a minúsculas aquí
             return None
         except Exception as e:
             logger.error(f"Error extrayendo email destinatario: {str(e)}")
@@ -74,34 +75,66 @@ class EmailCodeService:
     async def check_email_for_codes(self, email_address: str) -> dict:
         mail = None
         try:
-            # Conectar a Gmail
+            # Convertir el email de búsqueda a minúsculas
+            email_address = email_address.lower()
+            
             mail = self._connect_to_imap()
             mail.select("INBOX")
 
             # Buscar correos en los últimos 20 minutos
-            date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y %H:%M:%S")
-            search_criteria = f'(FROM "info@account.netflix.com") SINCE "{date}"'
+            date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y")
+            search_criteria = f'(SINCE "{date}" FROM "info@account.netflix.com")'
+            
+            logger.info(f"Buscando correos para {email_address} con criterios: {search_criteria}")
             
             _, messages = mail.search(None, search_criteria)
             
+            if not messages[0]:
+                logger.info(f"No se encontraron mensajes para {email_address}")
+                return {
+                    "has_code": False,
+                    "message": "No se encontraron códigos pendientes",
+                    "email": email_address
+                }
+
             for num in messages[0].split():
                 _, msg_data = mail.fetch(num, "(RFC822)")
                 email_body = msg_data[0][1]
                 email_message = email.message_from_bytes(email_body)
                 
-                # Verificar si el correo está dirigido al email solicitado
+                # Verificar destinatario
                 to_address = self._get_recipient_email(email_message)
-                if to_address and to_address.lower() == email_address.lower():
+                logger.info(f"Comparando {to_address} con {email_address}")
+                
+                if to_address and to_address == email_address:  # Ya están en minúsculas
                     body = self._get_email_body(email_message)
                     soup = BeautifulSoup(body, 'html.parser')
                     
-                    # Buscar el botón "Obtener código"
+                    # Buscar botón "Obtener código"
                     get_code_button = soup.find(
-                        'a', string=lambda text: text and ('Obtener código' in text or 'Get code' in text)
+                        'a', 
+                        class_=lambda x: x and 'btn-get-code' in x.lower(),
+                        string=lambda text: text and any(phrase in text for phrase in [
+                            'Obtener código',
+                            'Get code',
+                            'Obtener tu código'
+                        ])
                     )
+                    
+                    if not get_code_button:
+                        # Buscar por texto si no se encuentra por clase
+                        get_code_button = soup.find(
+                            'a',
+                            string=lambda text: text and any(phrase in text for phrase in [
+                                'Obtener código',
+                                'Get code',
+                                'Obtener tu código'
+                            ])
+                        )
                     
                     if get_code_button:
                         code_url = get_code_button.get('href')
+                        logger.info(f"✅ Código encontrado para {email_address}")
                         return {
                             "has_code": True,
                             "code_url": code_url,
@@ -109,23 +142,8 @@ class EmailCodeService:
                             "type": "netflix_code",
                             "message": "Código encontrado. Haz clic en el botón para obtenerlo."
                         }
-                    
-                    # Buscar el botón de confirmación para Hogar con Netflix
-                    confirm_button = soup.find(
-                        'a', string=lambda text: text and (
-                            'Sí, la envié yo' in text or 'Yes, it was me' in text)
-                    )
-                    
-                    if confirm_button:
-                        link = confirm_button.get('href')
-                        return {
-                            "has_code": True,
-                            "code_url": link,
-                            "email": email_address,
-                            "type": "netflix_home",
-                            "message": "Solicitud de confirmación encontrada."
-                        }
             
+            logger.info(f"❌ No se encontraron códigos para {email_address}")
             return {
                 "has_code": False,
                 "message": "No se encontraron códigos pendientes",
