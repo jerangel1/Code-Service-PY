@@ -1,0 +1,1 @@
+from .authorized_domain import AuthorizedDomain
