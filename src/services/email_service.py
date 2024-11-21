@@ -12,6 +12,7 @@ from email.header import decode_header
 
 from src.models.email_account import EmailAccount
 from src.services.code_extractor import CodeExtractor
+from src.models.authorized_domain import AuthorizedDomain
 
 logger = logging.getLogger(__name__)
 
@@ -24,26 +25,34 @@ class EmailCodeService:
         self.central_email = "serviciosnetplus@gmail.com"
         self.imap_server = "imap.gmail.com"
         self.imap_port = 993
-        self.timeout = 30  # Timeout en segundos
+        self.timeout = 60
         
         # Obtener contraseña de la DB
         self.central_password = self._get_central_email_password()
         
-        # Dominios autorizados específicos
-        self.authorized_domains = [
-            'netorgft1124943.onmicrosoft.com',
-            'nplus600.com',
-            'serviciosnp.com',
-            'smartservicesnp.com',
-            'snp2022.xyz'
-        ]
+        # Cargar dominios autorizados desde la DB
+        self.authorized_domains = self._load_authorized_domains()
+
+    def _load_authorized_domains(self) -> list:
+        """Carga los dominios autorizados desde la base de datos"""
+        try:
+            domains = self.db.query(AuthorizedDomain.domain).all()
+            return [domain[0] for domain in domains]
+        except Exception as e:
+            logger.error(f"Error cargando dominios autorizados: {str(e)}")
+            return []
 
     def _connect_to_imap(self):
         """Establece conexión con el servidor IMAP con timeout"""
         try:
+            logger.info(f"Intentando conectar a {self.imap_server}:{self.imap_port}")
             socket.setdefaulttimeout(self.timeout)
             mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            
+            logger.info(f"Intentando login con {self.central_email}")
             mail.login(self.central_email, self.central_password)
+            logger.info("Login exitoso")
+            
             return mail
         except socket.timeout:
             logger.error("Timeout al conectar con Gmail")
@@ -52,16 +61,16 @@ class EmailCodeService:
                 detail="Timeout al conectar con el servidor de correo"
             )
         except imaplib.IMAP4.error as e:
-            logger.error(f"Error IMAP: {str(e)}")
+            logger.error(f"Error IMAP detallado: {str(e)}")
             raise HTTPException(
                 status_code=401,
-                detail="Error de autenticación con Gmail"
+                detail=f"Error de autenticación con Gmail: {str(e)}"
             )
         except Exception as e:
-            logger.error(f"Error de conexión: {str(e)}")
+            logger.error(f"Error de conexión detallado: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail="Error al conectar con el servidor de correo"
+                detail=f"Error al conectar con el servidor de correo: {str(e)}"
             )
 
     def _get_central_email_password(self) -> str:
@@ -72,6 +81,87 @@ class EmailCodeService:
         if not email_account:
             raise Exception("Correo central no configurado en la base de datos")
         return email_account.password
+
+    async def add_authorized_domain(self, domain: str) -> dict:
+        """Agrega un nuevo dominio autorizado"""
+        try:
+            domain = domain.lower()
+            existing_domain = self.db.query(AuthorizedDomain).filter(
+                AuthorizedDomain.domain == domain
+            ).first()
+
+            if existing_domain:
+                return {
+                    "status": "info",
+                    "message": f"El dominio {domain} ya está autorizado"
+                }
+
+            new_domain = AuthorizedDomain(domain=domain)
+            self.db.add(new_domain)
+            self.db.commit()
+            
+            # Actualizar la lista en memoria
+            self.authorized_domains = self._load_authorized_domains()
+
+            return {
+                "status": "success",
+                "message": f"Dominio {domain} autorizado exitosamente"
+            }
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error al agregar dominio autorizado: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al agregar dominio: {str(e)}"
+            )
+
+    async def remove_authorized_domain(self, domain: str) -> dict:
+        """Elimina un dominio autorizado"""
+        try:
+            domain = domain.lower()
+            domain_record = self.db.query(AuthorizedDomain).filter(
+                AuthorizedDomain.domain == domain
+            ).first()
+
+            if not domain_record:
+                return {
+                    "status": "error",
+                    "message": f"El dominio {domain} no está autorizado"
+                }
+
+            self.db.delete(domain_record)
+            self.db.commit()
+            
+            # Actualizar la lista en memoria
+            self.authorized_domains = self._load_authorized_domains()
+
+            return {
+                "status": "success",
+                "message": f"Dominio {domain} eliminado exitosamente"
+            }
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error al eliminar dominio autorizado: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al eliminar dominio: {str(e)}"
+            )
+
+    async def get_authorized_domains(self) -> list:
+        """Obtiene la lista de dominios autorizados"""
+        try:
+            domains = self.db.query(AuthorizedDomain).all()
+            return [{
+                "id": domain.id,
+                "domain": domain.domain,
+                "created_at": domain.created_at
+            } for domain in domains]
+        except Exception as e:
+            logger.error(f"Error al obtener dominios autorizados: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error al obtener dominios autorizados"
+            )
 
     async def check_email_for_codes(self, email_address: str) -> dict:
         mail = None
