@@ -13,17 +13,18 @@ from src.services.code_extractor import CodeExtractor
 
 logger = logging.getLogger(__name__)
 
+
 class EmailCodeService:
     def __init__(self, db: Session):
         self.db = db
         self.code_extractor = CodeExtractor()
-        
+
         # Configuración para Gmail central
         self.central_email = "serviciosnetplus@gmail.com"
         self.imap_server = "imap.gmail.com"
         self.imap_port = 993
         self.timeout = 60
-        
+
         self.central_password = getenv('GMAIL_APP_PASSWORD')
         if not self.central_password:
             raise Exception("GMAIL_APP_PASSWORD no está configurado en .env")
@@ -31,21 +32,24 @@ class EmailCodeService:
     def _connect_to_imap(self):
         """Establece conexión con el servidor IMAP con timeout"""
         try:
-            logger.info(f"Intentando conectar a {self.imap_server}:{self.imap_port}")
+            logger.info(f"Intentando conectar a {
+                        self.imap_server}:{self.imap_port}")
             socket.setdefaulttimeout(self.timeout)
             mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
-            
+
             logger.info(f"Intentando login con {self.central_email}")
             mail.login(self.central_email, self.central_password)
             logger.info("Login exitoso")
-            
+
             return mail
         except socket.timeout:
             logger.error("Timeout al conectar con Gmail")
-            raise HTTPException(status_code=503, detail="Timeout al conectar con el servidor de correo")
+            raise HTTPException(
+                status_code=503, detail="Timeout al conectar con el servidor de correo")
         except Exception as e:
             logger.error(f"Error de conexión: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error al conectar con el servidor de correo: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Error al conectar con el servidor de correo: {str(e)}")
 
     def _get_email_body(self, email_message) -> str:
         """Extrae el cuerpo del mensaje de correo"""
@@ -66,7 +70,8 @@ class EmailCodeService:
                 # Extraer el email usando regex y convertir a minúsculas
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+', to_header)
                 if email_match:
-                    return email_match.group(0).lower()  # Convertir a minúsculas aquí
+                    # Convertir a minúsculas aquí
+                    return email_match.group(0).lower()
             return None
         except Exception as e:
             logger.error(f"Error extrayendo email destinatario: {str(e)}")
@@ -77,18 +82,20 @@ class EmailCodeService:
         try:
             # Convertir el email de búsqueda a minúsculas
             email_address = email_address.lower()
-            
+
             mail = self._connect_to_imap()
             mail.select("INBOX")
 
             # Buscar correos en los últimos 20 minutos
             date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y")
-            search_criteria = f'(SINCE "{date}" FROM "info@account.netflix.com")'
-            
-            logger.info(f"Buscando correos para {email_address} con criterios: {search_criteria}")
-            
+            search_criteria = f'(SINCE "{
+                date}" FROM "info@account.netflix.com")'
+
+            logger.info(f"Buscando correos para {
+                        email_address} con criterios: {search_criteria}")
+
             _, messages = mail.search(None, search_criteria)
-            
+
             if not messages[0]:
                 logger.info(f"No se encontraron mensajes para {email_address}")
                 return {
@@ -101,28 +108,32 @@ class EmailCodeService:
                 _, msg_data = mail.fetch(num, "(RFC822)")
                 email_body = msg_data[0][1]
                 email_message = email.message_from_bytes(email_body)
-                
+
                 # Verificar destinatario
                 to_address = self._get_recipient_email(email_message)
                 logger.info(f"Comparando {to_address} con {email_address}")
-                
-                if to_address and to_address == email_address:  # Ya están en minúsculas
+
+                if to_address and to_address == email_address:
                     body = self._get_email_body(email_message)
                     soup = BeautifulSoup(body, 'html.parser')
-                    
-                    # Buscar botón "Obtener código"
+
+                    # Buscar botón "Obtener código" con diferentes estrategias
+                    get_code_button = None
+
+                    # 1. Buscar por clase y texto
                     get_code_button = soup.find(
-                        'a', 
-                        class_=lambda x: x and 'btn-get-code' in x.lower(),
+                        'a',
+                        class_=lambda x: x and (
+                            'btn-get-code' in x.lower() or 'button' in x.lower()),
                         string=lambda text: text and any(phrase in text for phrase in [
                             'Obtener código',
                             'Get code',
                             'Obtener tu código'
                         ])
                     )
-                    
+
+                    # 2. Buscar solo por texto si no se encontró
                     if not get_code_button:
-                        # Buscar por texto si no se encuentra por clase
                         get_code_button = soup.find(
                             'a',
                             string=lambda text: text and any(phrase in text for phrase in [
@@ -131,18 +142,43 @@ class EmailCodeService:
                                 'Obtener tu código'
                             ])
                         )
-                    
+
+                    # 3. Buscar por el botón rojo característico de Netflix
+                    if not get_code_button:
+                        get_code_button = soup.find(
+                            'a',
+                            style=lambda x: x and 'background-color: #e50914' in x.lower()
+                        )
+
                     if get_code_button:
                         code_url = get_code_button.get('href')
-                        logger.info(f"✅ Código encontrado para {email_address}")
-                        return {
-                            "has_code": True,
-                            "code_url": code_url,
-                            "email": email_address,
-                            "type": "netflix_code",
-                            "message": "Código encontrado. Haz clic en el botón para obtenerlo."
-                        }
-            
+
+                        # Verificar si la URL es válida y contiene los parámetros esperados
+                        if code_url and ('netflix.com/login' in code_url or 'netflix.com/account/travel/verify' in code_url):
+                            logger.info(
+                                f"✅ URL de código encontrada: {code_url}")
+
+                            # Extraer el messageGuid si está presente
+                            message_guid = None
+                            if 'messageGuid' in code_url:
+                                guid_match = re.search(
+                                    r'messageGuid=([^&]+)', code_url)
+                                if guid_match:
+                                    message_guid = guid_match.group(1)
+
+                            return {
+                                "has_code": True,
+                                "code_url": code_url,
+                                "email": email_address,
+                                "type": "netflix_code",
+                                "message": "Código encontrado. Haz clic en el botón para obtenerlo.",
+                                "message_guid": message_guid,
+                                "expires_in": "15 minutos"
+                            }
+                        else:
+                            logger.warning(
+                                f"⚠️ URL no válida encontrada: {code_url}")
+
             logger.info(f"❌ No se encontraron códigos para {email_address}")
             return {
                 "has_code": False,
