@@ -9,7 +9,7 @@ import email
 import re
 import socket
 from email.header import decode_header
-
+from os import getenv
 from src.models.email_account import EmailAccount
 from src.services.code_extractor import CodeExtractor
 from src.models.authorized_domain import AuthorizedDomain
@@ -27,8 +27,10 @@ class EmailCodeService:
         self.imap_port = 993
         self.timeout = 60
         
-        # Obtener contraseña de la DB
-        self.central_password = self._get_central_email_password()
+        # Usar la contraseña de aplicación del .env en lugar de la DB
+        self.central_password = getenv('GMAIL_APP_PASSWORD')
+        if not self.central_password:
+            raise Exception("GMAIL_APP_PASSWORD no está configurado en .env")
         
         # Cargar dominios autorizados desde la DB
         self.authorized_domains = self._load_authorized_domains()
