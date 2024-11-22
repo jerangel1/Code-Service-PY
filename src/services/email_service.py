@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
