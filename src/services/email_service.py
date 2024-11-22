@@ -14,22 +14,23 @@ from src.services.code_extractor import CodeExtractor
 
 logger = logging.getLogger(__name__)
 
+
 class EmailCodeService:
     def __init__(self, db: Session):
         self.db = db
         self.code_extractor = CodeExtractor()
-        
+
         # Configuración para Gmail central
         self.central_email = "serviciosnetplus@gmail.com"
         self.imap_server = "imap.gmail.com"
         self.imap_port = 993
         self.timeout = 60
-        
+
         # Cache de conexión IMAP
         self._mail_connection = None
         self._last_connection_time = None
         self._connection_timeout = 300  # 5 minutos
-        
+
         self.central_password = getenv('GMAIL_APP_PASSWORD')
         if not self.central_password:
             raise Exception("GMAIL_APP_PASSWORD no está configurado en .env")
@@ -37,22 +38,22 @@ class EmailCodeService:
     def _get_mail_connection(self):
         """Reutiliza la conexión IMAP si está activa"""
         current_time = datetime.now()
-        
-        if (self._mail_connection and self._last_connection_time and 
-            (current_time - self._last_connection_time).seconds < self._connection_timeout):
+
+        if (self._mail_connection and self._last_connection_time and
+                (current_time - self._last_connection_time).seconds < self._connection_timeout):
             try:
                 self._mail_connection.noop()
                 return self._mail_connection
             except:
                 pass
-        
+
         if self._mail_connection:
             try:
                 self._mail_connection.close()
                 self._mail_connection.logout()
             except:
                 pass
-        
+
         self._mail_connection = self._connect_to_imap()
         self._last_connection_time = current_time
         return self._mail_connection
@@ -69,8 +70,24 @@ class EmailCodeService:
             logger.error(f"Error de conexión: {str(e)}")
             raise HTTPException(
                 status_code=503,
-                detail={"status": "error", "message": f"Error de conexión: {str(e)}"}
+                detail={"status": "error",
+                        "message": f"Error de conexión: {str(e)}"}
             )
+
+    def _get_email_body(self, email_message) -> str:
+        """Extrae el cuerpo del mensaje de correo"""
+        try:
+            if email_message.is_multipart():
+                for part in email_message.walk():
+                    if part.get_content_type() == "text/html":
+                        payload = part.get_payload(decode=True)
+                        return payload.decode('utf-8', errors='ignore')
+            else:
+                payload = email_message.get_payload(decode=True)
+                return payload.decode('utf-8', errors='ignore')
+        except Exception as e:
+            logger.error(f"Error decodificando el cuerpo del email: {str(e)}")
+            return ""
 
     def _is_email_valid(self, email_message) -> tuple[bool, datetime]:
         """Verifica si el correo está dentro del tiempo válido"""
@@ -78,16 +95,16 @@ class EmailCodeService:
             date_str = email_message.get('Date')
             if not date_str:
                 return False, None
-            
+
             email_date = parsedate_to_datetime(date_str)
             current_time = datetime.now(email_date.tzinfo)
-            
+
             # Verificar si el correo tiene menos de 15 minutos
             time_difference = current_time - email_date
             is_valid = time_difference.total_seconds() < 900  # 15 minutos en segundos
-            
+
             return is_valid, email_date
-            
+
         except Exception as e:
             logger.error(f"Error al procesar fecha: {str(e)}")
             return False, None
@@ -97,20 +114,21 @@ class EmailCodeService:
             email_address = email_address.lower()
             mail = self._get_mail_connection()
             mail.select("INBOX")
-            
+
             # Buscar correos en los últimos 16 minutos (margen extra)
             date = (datetime.now() - timedelta(minutes=16)).strftime("%d-%b-%Y")
             search_criteria = (
-                f'(SINCE "{date}" FROM "info@account.netflix.com" '
-                f'SUBJECT "código de acceso temporal" LARGER 100)'
-            )
-            
+                '(SINCE "{}" FROM "info@account.netflix.com" '
+                'SUBJECT "codigo de acceso temporal" LARGER 100)'.format(date)
+            ).encode('utf-8')
+
             _, messages = mail.search(None, search_criteria)
             if not messages[0]:
                 return {
                     "has_code": False,
                     "message": "No se encontraron códigos pendientes",
-                    "email": email_address
+                    "email": email_address,
+                    "timestamp": datetime.now().isoformat()
                 }
 
             # Procesar correos del más reciente al más antiguo
@@ -118,50 +136,64 @@ class EmailCodeService:
             message_nums.reverse()
 
             for num in message_nums[:5]:  # Limitar a los 5 más recientes
-                _, msg_data = mail.fetch(num, "(RFC822)")
-                email_message = email.message_from_bytes(msg_data[0][1])
-                
-                # Verificar destinatario
-                to_address = email_message.get('To', '').lower()
-                if email_address not in to_address:
+                try:
+                    _, msg_data = mail.fetch(num, "(RFC822)")
+                    email_message = email.message_from_bytes(msg_data[0][1])
+
+                    # Verificar destinatario
+                    to_address = email_message.get('To', '').lower()
+                    if email_address not in to_address:
+                        continue
+
+                    # Verificar tiempo válido
+                    is_valid, email_date = self._is_email_valid(email_message)
+                    if not is_valid:
+                        logger.info(f"Correo expirado para {email_address}")
+                        continue
+
+                    # Procesar cuerpo del correo
+                    body = self._get_email_body(email_message)
+                    if not body:
+                        continue
+
+                    soup = BeautifulSoup(body, 'lxml', from_encoding='utf-8')
+
+                    # Buscar botón de código de forma optimizada
+                    get_code_button = (
+                        soup.find('a', class_='btn-get-code') or
+                        soup.find('a', string=lambda x: x and any(phrase in x.lower() for phrase in [
+                            'obtener codigo', 'get code', 'obtener tu codigo'
+                        ])) or
+                        soup.find('a', style=lambda x: x and '#e50914' in x)
+                    )
+
+                    if get_code_button and (code_url := get_code_button.get('href')):
+                        if 'netflix.com' in code_url:
+                            message_guid = re.search(
+                                r'messageGuid=([^&]+)', code_url)
+
+                            # Calcular tiempo restante
+                            remaining_seconds = 900 - \
+                                (datetime.now(email_date.tzinfo) -
+                                 email_date).total_seconds()
+                            remaining_minutes = max(
+                                1, int(remaining_seconds / 60))
+
+                            return {
+                                "has_code": True,
+                                "code_url": code_url,
+                                "email": email_address,
+                                "type": "netflix_code",
+                                "message": "Código válido encontrado",
+                                "message_guid": message_guid.group(1) if message_guid else None,
+                                "expires_in": f"{remaining_minutes} minutos",
+                                "email_date": email_date.isoformat(),
+                                "timestamp": datetime.now().isoformat()
+                            }
+                except Exception as e:
+                    logger.error(
+                        f"Error procesando mensaje individual: {str(e)}")
                     continue
-                
-                # Verificar tiempo válido
-                is_valid, email_date = self._is_email_valid(email_message)
-                if not is_valid:
-                    logger.info(f"Correo expirado para {email_address}")
-                    continue
-                
-                # Procesar cuerpo del correo
-                body = self._get_email_body(email_message)
-                soup = BeautifulSoup(body, 'lxml')
-                
-                # Buscar botón de código de forma optimizada
-                get_code_button = (
-                    soup.find('a', class_='btn-get-code') or
-                    soup.find('a', string=['Obtener código', 'Get code', 'Obtener tu código']) or
-                    soup.find('a', style=lambda x: x and '#e50914' in x)
-                )
-                
-                if get_code_button and (code_url := get_code_button.get('href')):
-                    if 'netflix.com' in code_url:
-                        message_guid = re.search(r'messageGuid=([^&]+)', code_url)
-                        
-                        # Calcular tiempo restante
-                        remaining_seconds = 900 - (datetime.now(email_date.tzinfo) - email_date).total_seconds()
-                        remaining_minutes = max(1, int(remaining_seconds / 60))
-                        
-                        return {
-                            "has_code": True,
-                            "code_url": code_url,
-                            "email": email_address,
-                            "type": "netflix_code",
-                            "message": "Código válido encontrado",
-                            "message_guid": message_guid.group(1) if message_guid else None,
-                            "expires_in": f"{remaining_minutes} minutos",
-                            "email_date": email_date.isoformat(),
-                            "timestamp": datetime.now().isoformat()
-                        }
 
             return {
                 "has_code": False,
@@ -171,8 +203,12 @@ class EmailCodeService:
             }
 
         except Exception as e:
-            logger.error(f"Error: {str(e)}")
+            logger.error(f"Error general: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail={"status": "error", "message": str(e)}
+                detail={
+                    "status": "error",
+                    "message": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
             )
