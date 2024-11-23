@@ -118,9 +118,11 @@ class EmailCodeService:
             logger.error(f"Error al procesar fecha: {str(e)}")
             return False, None
 
-    async def check_email_for_codes(self, email_address: str) -> dict:
+async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             email_address = email_address.lower()
+            logger.info(f"Buscando códigos para: {email_address}")
+            
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
@@ -128,13 +130,15 @@ class EmailCodeService:
             current_time = self._get_current_time()
             start_time = current_time - timedelta(minutes=20)   
 
-            # Nuevo código de búsqueda simplificado
+            # Búsqueda simplificada
             search_date = start_time.strftime("%d-%b-%Y")
-            search_criteria = f'(SINCE "{search_date}" FROM "info@account.netflix.com" SUBJECT "Tu codigo de acceso temporal de Netflix")'.encode()
+            search_criteria = f'(SINCE "{search_date}" FROM "info@account.netflix.com")'.encode()
 
             logger.info(f"Búsqueda - Hora actual: {current_time}, Inicio: {start_time}, Criterios: {search_criteria}")
 
             _, messages = mail.search(None, search_criteria)
+            logger.info(f"Mensajes encontrados: {len(messages[0].split()) if messages[0] else 0}")
+
             if not messages[0]:
                 return {
                     "has_code": False,
@@ -147,13 +151,15 @@ class EmailCodeService:
             message_nums = messages[0].split()
             message_nums.reverse()
 
-            for num in message_nums[:80]:  # Limitar a los 80 más recientes
+            for num in message_nums[:80]:
                 try:
                     _, msg_data = mail.fetch(num, "(RFC822)")
                     email_message = email.message_from_bytes(msg_data[0][1])
 
                     # Verificar destinatario
                     to_address = email_message.get('To', '').lower()
+                    logger.info(f"Verificando destinatario - To: {to_address}, Buscando: {email_address}")
+                    
                     if email_address not in to_address:
                         continue
 
@@ -166,30 +172,39 @@ class EmailCodeService:
                     # Procesar cuerpo del correo
                     body = self._get_email_body(email_message)
                     if not body:
+                        logger.info("Cuerpo del correo vacío")
                         continue
 
                     soup = BeautifulSoup(body, 'lxml', from_encoding='utf-8')
 
-                    # Buscar botón de código de forma optimizada
-                    get_code_button = (
-                        soup.find('a', class_='btn-get-code') or
-                        soup.find('a', string=lambda x: x and any(phrase in x.lower() for phrase in [
-                            'obtener codigo', 'get code', 'obtener tu codigo'
-                        ])) or
-                        soup.find('a', style=lambda x: x and '#e50914' in x)
-                    )
+                    # Buscar botón de código con más logging
+                    logger.info("Buscando botón de código...")
+                    
+                    # Buscar cualquier enlace que contenga la palabra "código" o "code"
+                    get_code_button = None
+                    for link in soup.find_all('a'):
+                        href = link.get('href', '')
+                        text = link.get_text().lower()
+                        style = link.get('style', '')
+                        
+                        logger.info(f"Enlace encontrado - Texto: {text}, Href: {href}, Style: {style}")
+                        
+                        if ('netflix.com' in href and 
+                            ('codigo' in text or 'code' in text or 
+                             'obtener' in text or 'get' in text or 
+                             '#e50914' in style)):
+                            get_code_button = link
+                            break
 
                     if get_code_button and (code_url := get_code_button.get('href')):
+                        logger.info(f"URL del código encontrada: {code_url}")
+                        
                         if 'netflix.com' in code_url:
-                            message_guid = re.search(
-                                r'messageGuid=([^&]+)', code_url)
+                            message_guid = re.search(r'messageGuid=([^&]+)', code_url)
 
-                            # Calcular tiempo restante usando la zona horaria correcta
-                            remaining_seconds = 900 - \
-                                (self._get_current_time() -
-                                 email_date).total_seconds()
-                            remaining_minutes = max(
-                                1, int(remaining_seconds / 60))
+                            # Calcular tiempo restante
+                            remaining_seconds = 900 - (self._get_current_time() - email_date).total_seconds()
+                            remaining_minutes = max(1, int(remaining_seconds / 60))
 
                             return {
                                 "has_code": True,
@@ -203,8 +218,7 @@ class EmailCodeService:
                                 "timestamp": self._get_current_time().isoformat()
                             }
                 except Exception as e:
-                    logger.error(
-                        f"Error procesando mensaje individual: {str(e)}")
+                    logger.error(f"Error procesando mensaje individual: {str(e)}")
                     continue
 
             return {
