@@ -116,6 +116,17 @@ class EmailCodeService:
 
     async def check_email_for_codes(self, email_address: str) -> dict:
         try:
+            # Validar formato de correo básico
+            if not re.match(r"[^@]+@[^@]+\.[^@]+", email_address):
+                logger.warning(f"Formato de correo inválido: {email_address}")
+                return {
+                    "has_code": False,
+                    "status": "error",
+                    "message": "El formato del correo electrónico no es válido",
+                    "email": email_address,
+                    "timestamp": datetime.now().isoformat()
+                }
+
             email_address = email_address.lower()
             logger.info(f"Buscando códigos para el correo: {email_address}")
 
@@ -135,14 +146,18 @@ class EmailCodeService:
                 logger.info(f"No se encontraron correos para {email_address}")
                 return {
                     "has_code": False,
-                    "message": "No se encontraron códigos pendientes",
+                    "status": "warning",
+                    "message": "No se encontraron correos de Netflix asociados a esta cuenta",
                     "email": email_address,
                     "timestamp": datetime.now().isoformat()
                 }
 
             message_nums = messages[0].split()
-            message_nums.reverse()  # Del más reciente al más antiguo
+            message_nums.reverse()
             logger.info(f"Correos encontrados: {len(message_nums)}")
+
+            expired_codes_found = False
+            invalid_recipient_found = False
 
             for num in message_nums[:50]:  # Revisamos los últimos 50 correos
                 try:
@@ -157,6 +172,7 @@ class EmailCodeService:
                         f"Procesando correo - Para: {to_address}, Asunto: {subject}")
 
                     if email_address not in to_address:
+                        invalid_recipient_found = True
                         logger.info(
                             f"Correo no coincide con destinatario: {to_address}")
                         continue
@@ -168,6 +184,7 @@ class EmailCodeService:
                     # Verificar tiempo válido
                     is_valid, email_date = self._is_email_valid(email_message)
                     if not is_valid:
+                        expired_codes_found = True
                         logger.info(f"Correo expirado para {email_address}")
                         continue
 
@@ -215,6 +232,7 @@ class EmailCodeService:
 
                             return {
                                 "has_code": True,
+                                "status": "success",
                                 "code_url": code_url,
                                 "email": email_address,
                                 "type": "netflix_code",
@@ -224,16 +242,34 @@ class EmailCodeService:
                                 "email_date": email_date.isoformat(),
                                 "timestamp": datetime.now().isoformat()
                             }
+
                 except Exception as e:
                     logger.error(
                         f"Error procesando mensaje individual: {str(e)}")
                     continue
 
-            logger.info(f"No se encontraron códigos válidos para {
-                        email_address}")
+            # Determinar el mensaje apropiado según el caso
+            if expired_codes_found:
+                return {
+                    "has_code": False,
+                    "status": "warning",
+                    "message": "Se encontraron códigos pero ya han expirado. Solicite un nuevo código.",
+                    "email": email_address,
+                    "timestamp": datetime.now().isoformat()
+                }
+            elif invalid_recipient_found:
+                return {
+                    "has_code": False,
+                    "status": "error",
+                    "message": "El correo proporcionado no coincide con ningún destinatario",
+                    "email": email_address,
+                    "timestamp": datetime.now().isoformat()
+                }
+
             return {
                 "has_code": False,
-                "message": "No se encontraron códigos válidos",
+                "status": "info",
+                "message": "No se encontraron códigos válidos para este correo",
                 "email": email_address,
                 "timestamp": datetime.now().isoformat()
             }
@@ -244,7 +280,7 @@ class EmailCodeService:
                 status_code=500,
                 detail={
                     "status": "error",
-                    "message": str(e),
+                    "message": f"Error del servidor: {str(e)}",
                     "timestamp": datetime.now().isoformat()
                 }
             )
