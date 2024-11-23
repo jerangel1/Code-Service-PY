@@ -197,7 +197,7 @@ class EmailCodeService:
                     soup = BeautifulSoup(
                         body, 'lxml', from_encoding='utf-8')
 
-                    # Buscar el botón con múltiples estrategias
+                      # Buscar el botón con múltiples estrategias
                     get_code_button = None
 
                     # 1. Buscar por texto exacto
@@ -215,14 +215,12 @@ class EmailCodeService:
                         get_code_button = soup.find(
                             'a', href=lambda x: x and 'netflix.com' in x.lower() and 'codigo' in x.lower())
 
-                    # Corregir el formato del log
-                    logger.info(f"Botón encontrado: {
-                                get_code_button is not None}")
+                    # Log en una sola línea
+                    logger.info(f"Botón encontrado: {get_code_button is not None}")
 
                     if get_code_button and (code_url := get_code_button.get('href')):
                         if 'netflix.com' in code_url:
-                            logger.info(
-                                f"URL del código encontrada: {code_url}")
+                            logger.info(f"URL del código encontrada: {code_url}")
 
                             message_guid = re.search(
                                 r'messageGuid=([^&]+)', code_url)
