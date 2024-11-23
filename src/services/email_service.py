@@ -103,7 +103,8 @@ class EmailCodeService:
             time_difference = current_time - email_date
             is_valid = time_difference.total_seconds() < 900  # 15 minutos
 
-            logger.info(f"Validación de correo - Fecha: {email_date}, Hora actual: {current_time}, Diferencia: {time_difference.total_seconds()}s, Válido: {is_valid}")
+            logger.info(f"Validación de correo - Fecha: {email_date}, Hora actual: {
+                        current_time}, Diferencia: {time_difference.total_seconds()}s, Válido: {is_valid}")
 
             return is_valid, email_date
 
@@ -111,33 +112,31 @@ class EmailCodeService:
             logger.error(f"Error al procesar fecha: {str(e)}")
             return False, None
 
+
     async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             email_address = email_address.lower()
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
-        # Calcular el rango de tiempo para la búsqueda
+            # Calcular el rango de tiempo para la búsqueda
             current_time = datetime.now()
-            start_time = current_time - timedelta(minutes=20)
+            start_time = current_time - timedelta(minutes=20)   
 
             # Manejar el cambio de día
             if start_time.date() != current_time.date():
-                date_criteria = f'(OR SINCE "{start_time.strftime(
-                    "%d-%b-%Y")}" SINCE "{current_time.strftime("%d-%b-%Y")}")'.encode()
+                date_criteria = f'(OR SINCE "{start_time.strftime("%d-%b-%Y")}" SINCE "{current_time.strftime("%d-%b-%Y")}")'.encode()
             else:
-                date_criteria = f'SINCE "{
-                    start_time.strftime("%d-%b-%Y")}"'.encode()
+                date_criteria = f'SINCE "{start_time.strftime("%d-%b-%Y")}"'.encode()
 
-            # Criterios de búsqueda actualizados
+                # Criterios de búsqueda actualizados
             search_criteria = [
                 date_criteria,
                 b'FROM', b'info@account.netflix.com',
                 b'SUBJECT', b'Tu codigo de acceso temporal de Netflix'
             ]
 
-            logger.info(f"Búsqueda - Hora actual: {current_time}, Inicio: {
-                        start_time}, Criterios: {search_criteria}")
+            logger.info(f"Búsqueda - Hora actual: {current_time}, Inicio: {start_time}, Criterios: {search_criteria}")
 
             _, messages = mail.search(None, *search_criteria)
             if not messages[0]:
@@ -152,7 +151,7 @@ class EmailCodeService:
             message_nums = messages[0].split()
             message_nums.reverse()
 
-            for num in message_nums[:50]:  # Limitar a los 50 más recientes
+            for num in message_nums[:80]:  # Limitar a los 80 más recientes
                 try:
                     _, msg_data = mail.fetch(num, "(RFC822)")
                     email_message = email.message_from_bytes(msg_data[0][1])
@@ -192,7 +191,7 @@ class EmailCodeService:
                             # Calcular tiempo restante
                             remaining_seconds = 980 - \
                                 (datetime.now(email_date.tzinfo) -
-                                email_date).total_seconds()
+                                 email_date).total_seconds()
                             remaining_minutes = max(
                                 1, int(remaining_seconds / 60))
 
