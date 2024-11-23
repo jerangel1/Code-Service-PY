@@ -135,7 +135,7 @@ class EmailCodeService:
             message_nums = messages[0].split()
             message_nums.reverse()
 
-            for num in message_nums[:5]:  # Limitar a los 5 más recientes
+            for num in message_nums[:50]:  # Limitar a los 50 más recientes
                 try:
                     _, msg_data = mail.fetch(num, "(RFC822)")
                     email_message = email.message_from_bytes(msg_data[0][1])
