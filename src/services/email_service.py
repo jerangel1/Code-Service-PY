@@ -102,11 +102,11 @@ class EmailCodeService:
 
             # Verificar si el correo tiene menos de 15 minutos
             time_difference = current_time - email_date
-            is_valid = time_difference.total_seconds() < 900  # 15 minutos en segundos
+            is_valid = time_difference.total_seconds() < 900  # 15 minutos
 
             logger.info(f"Fecha del correo: {email_date}, "
-                       f"Hora actual: {current_time}, "
-                       f"Diferencia: {time_difference.total_seconds()} segundos")
+                        f"Hora actual: {current_time}, "
+                        f"Diferencia: {time_difference.total_seconds()} segundos")
 
             return is_valid, email_date
 
@@ -118,17 +118,16 @@ class EmailCodeService:
         try:
             email_address = email_address.lower()
             logger.info(f"Buscando códigos para el correo: {email_address}")
-            
+
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
-            # Buscar correos en los últimos 20 minutos
+            # Buscar correos con criterios más flexibles
             date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y")
             search_criteria = (
-                '(SINCE "{}" FROM "info@account.netflix.com" '
-                'SUBJECT "codigo de acceso temporal")'.format(date)
+                f'(SINCE "{date}" FROM "info@account.netflix.com")'
             ).encode('utf-8')
-            
+
             logger.info(f"Criterios de búsqueda: {search_criteria}")
 
             _, messages = mail.search(None, search_criteria)
@@ -142,18 +141,28 @@ class EmailCodeService:
                 }
 
             message_nums = messages[0].split()
-            message_nums.reverse()
+            message_nums.reverse()  # Del más reciente al más antiguo
             logger.info(f"Correos encontrados: {len(message_nums)}")
 
-            for num in message_nums[:5]:  # Limitar a los 5 más recientes
+            for num in message_nums[:50]:  # Revisamos los últimos 50 correos
                 try:
                     _, msg_data = mail.fetch(num, "(RFC822)")
                     email_message = email.message_from_bytes(msg_data[0][1])
 
-                    # Verificar destinatario
+                    # Verificar destinatario y asunto
                     to_address = email_message.get('To', '').lower()
+                    subject = email_message.get('Subject', '').lower()
+
+                    logger.info(
+                        f"Procesando correo - Para: {to_address}, Asunto: {subject}")
+
                     if email_address not in to_address:
-                        logger.info(f"Correo no coincide con destinatario: {to_address}")
+                        logger.info(
+                            f"Correo no coincide con destinatario: {to_address}")
+                        continue
+
+                    if "codigo de acceso temporal" not in subject:
+                        logger.info(f"Asunto no coincide: {subject}")
                         continue
 
                     # Verificar tiempo válido
@@ -165,27 +174,44 @@ class EmailCodeService:
                     # Procesar cuerpo del correo
                     body = self._get_email_body(email_message)
                     if not body:
+                        logger.info("Cuerpo del correo vacío")
                         continue
 
                     soup = BeautifulSoup(body, 'lxml', from_encoding='utf-8')
 
-                    # Buscar el botón "Obtener código" específicamente
-                    get_code_button = (
-                        soup.find('a', string='Obtener código') or  # Texto exacto
-                        soup.find('a', class_='btn-get-code') or    # Clase específica
-                        soup.find('a', string=lambda x: x and 'obtener código' in x.lower()) or  # Texto parcial
-                        soup.find('a', style=lambda x: x and '#e50914' in x)  # Color de Netflix
-                    )
+                    # Buscar el botón con múltiples estrategias
+                    get_code_button = None
+
+                    # 1. Buscar por texto exacto
+                    get_code_button = soup.find('a', string='Obtener código')
+                    if not get_code_button:
+                        # 2. Buscar por texto case-insensitive
+                        get_code_button = soup.find(
+                            'a', string=lambda x: x and 'obtener código' in x.lower())
+                    if not get_code_button:
+                        # 3. Buscar por estilo de Netflix
+                        get_code_button = soup.find(
+                            'a', style=lambda x: x and '#e50914' in x)
+                    if not get_code_button:
+                        # 4. Buscar cualquier enlace que contenga netflix y código
+                        get_code_button = soup.find(
+                            'a', href=lambda x: x and 'netflix.com' in x.lower() and 'codigo' in x.lower())
+
+                    logger.info(f"Botón encontrado: {
+                                get_code_button is not None}")
 
                     if get_code_button and (code_url := get_code_button.get('href')):
                         if 'netflix.com' in code_url:
-                            logger.info(f"Código válido encontrado para {email_address}")
-                            
-                            message_guid = re.search(r'messageGuid=([^&]+)', code_url)
+                            logger.info(
+                                f"URL del código encontrada: {code_url}")
+
+                            message_guid = re.search(
+                                r'messageGuid=([^&]+)', code_url)
                             remaining_seconds = 900 - \
                                 (datetime.now(email_date.tzinfo) -
                                  email_date).total_seconds()
-                            remaining_minutes = max(1, int(remaining_seconds / 60))
+                            remaining_minutes = max(
+                                1, int(remaining_seconds / 60))
 
                             return {
                                 "has_code": True,
@@ -199,10 +225,12 @@ class EmailCodeService:
                                 "timestamp": datetime.now().isoformat()
                             }
                 except Exception as e:
-                    logger.error(f"Error procesando mensaje individual: {str(e)}")
+                    logger.error(
+                        f"Error procesando mensaje individual: {str(e)}")
                     continue
 
-            logger.info(f"No se encontraron códigos válidos para {email_address}")
+            logger.info(f"No se encontraron códigos válidos para {
+                        email_address}")
             return {
                 "has_code": False,
                 "message": "No se encontraron códigos válidos",
