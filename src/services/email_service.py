@@ -104,6 +104,10 @@ class EmailCodeService:
             time_difference = current_time - email_date
             is_valid = time_difference.total_seconds() < 900  # 15 minutos en segundos
 
+            logger.info(f"Fecha del correo: {email_date}, "
+                       f"Hora actual: {current_time}, "
+                       f"Diferencia: {time_difference.total_seconds()} segundos")
+
             return is_valid, email_date
 
         except Exception as e:
@@ -113,18 +117,23 @@ class EmailCodeService:
     async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             email_address = email_address.lower()
+            logger.info(f"Buscando códigos para el correo: {email_address}")
+            
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
-            # Buscar correos en los últimos 16 minutos (margen extra)
-            date = (datetime.now() - timedelta(minutes=16)).strftime("%d-%b-%Y")
+            # Buscar correos en los últimos 20 minutos
+            date = (datetime.now() - timedelta(minutes=20)).strftime("%d-%b-%Y")
             search_criteria = (
                 '(SINCE "{}" FROM "info@account.netflix.com" '
-                'SUBJECT "codigo de acceso temporal" LARGER 100)'.format(date)
+                'SUBJECT "codigo de acceso temporal")'.format(date)
             ).encode('utf-8')
+            
+            logger.info(f"Criterios de búsqueda: {search_criteria}")
 
             _, messages = mail.search(None, search_criteria)
             if not messages[0]:
+                logger.info(f"No se encontraron correos para {email_address}")
                 return {
                     "has_code": False,
                     "message": "No se encontraron códigos pendientes",
@@ -132,9 +141,9 @@ class EmailCodeService:
                     "timestamp": datetime.now().isoformat()
                 }
 
-            # Procesar correos del más reciente al más antiguo
             message_nums = messages[0].split()
             message_nums.reverse()
+            logger.info(f"Correos encontrados: {len(message_nums)}")
 
             for num in message_nums[:5]:  # Limitar a los 5 más recientes
                 try:
@@ -144,6 +153,7 @@ class EmailCodeService:
                     # Verificar destinatario
                     to_address = email_message.get('To', '').lower()
                     if email_address not in to_address:
+                        logger.info(f"Correo no coincide con destinatario: {to_address}")
                         continue
 
                     # Verificar tiempo válido
@@ -159,26 +169,23 @@ class EmailCodeService:
 
                     soup = BeautifulSoup(body, 'lxml', from_encoding='utf-8')
 
-                    # Buscar botón de código de forma optimizada
+                    # Buscar el botón "Obtener código" específicamente
                     get_code_button = (
-                        soup.find('a', class_='btn-get-code') or
-                        soup.find('a', string=lambda x: x and any(phrase in x.lower() for phrase in [
-                            'obtener codigo', 'get code', 'obtener tu codigo'
-                        ])) or
-                        soup.find('a', style=lambda x: x and '#e50914' in x)
+                        soup.find('a', string='Obtener código') or  # Texto exacto
+                        soup.find('a', class_='btn-get-code') or    # Clase específica
+                        soup.find('a', string=lambda x: x and 'obtener código' in x.lower()) or  # Texto parcial
+                        soup.find('a', style=lambda x: x and '#e50914' in x)  # Color de Netflix
                     )
 
                     if get_code_button and (code_url := get_code_button.get('href')):
                         if 'netflix.com' in code_url:
-                            message_guid = re.search(
-                                r'messageGuid=([^&]+)', code_url)
-
-                            # Calcular tiempo restante
+                            logger.info(f"Código válido encontrado para {email_address}")
+                            
+                            message_guid = re.search(r'messageGuid=([^&]+)', code_url)
                             remaining_seconds = 900 - \
                                 (datetime.now(email_date.tzinfo) -
                                  email_date).total_seconds()
-                            remaining_minutes = max(
-                                1, int(remaining_seconds / 60))
+                            remaining_minutes = max(1, int(remaining_seconds / 60))
 
                             return {
                                 "has_code": True,
@@ -192,10 +199,10 @@ class EmailCodeService:
                                 "timestamp": datetime.now().isoformat()
                             }
                 except Exception as e:
-                    logger.error(
-                        f"Error procesando mensaje individual: {str(e)}")
+                    logger.error(f"Error procesando mensaje individual: {str(e)}")
                     continue
 
+            logger.info(f"No se encontraron códigos válidos para {email_address}")
             return {
                 "has_code": False,
                 "message": "No se encontraron códigos válidos",
