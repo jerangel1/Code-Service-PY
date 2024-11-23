@@ -103,9 +103,7 @@ class EmailCodeService:
             time_difference = current_time - email_date
             is_valid = time_difference.total_seconds() < 900  # 15 minutos
 
-            logger.info(f"Validación de correo - Fecha: {email_date}, Hora actual: {
-                        current_time}, Diferencia: {time_difference.total_seconds()}s, Válido: {is_valid}")
-
+            logger.info(f"Validación de correo - Fecha: {email_date}, Hora actual: {current_time}, Diferencia: {time_difference.total_seconds()}s, Válido: {is_valid}")
             return is_valid, email_date
 
         except Exception as e:
