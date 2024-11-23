@@ -101,7 +101,9 @@ class EmailCodeService:
 
             # Verificar si el correo tiene menos de 15 minutos
             time_difference = current_time - email_date
-            is_valid = time_difference.total_seconds() < 900  # 15 minutos en segundos
+            is_valid = time_difference.total_seconds() < 900  # 15 minutos
+
+            logger.info(f"Validación de correo - Fecha: {email_date}, Hora actual: {current_time}, Diferencia: {time_difference.total_seconds()}s, Válido: {is_valid}")
 
             return is_valid, email_date
 
@@ -115,17 +117,27 @@ class EmailCodeService:
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
-            # Modificar la construcción del criterio de búsqueda
-            date = (datetime.now() - timedelta(minutes=16)).strftime("%d-%b-%Y")
+        # Calcular el rango de tiempo para la búsqueda
+            current_time = datetime.now()
+            start_time = current_time - timedelta(minutes=20)
 
-            # Separar los criterios de búsqueda
+            # Manejar el cambio de día
+            if start_time.date() != current_time.date():
+                date_criteria = f'(OR SINCE "{start_time.strftime(
+                    "%d-%b-%Y")}" SINCE "{current_time.strftime("%d-%b-%Y")}")'.encode()
+            else:
+                date_criteria = f'SINCE "{
+                    start_time.strftime("%d-%b-%Y")}"'.encode()
+
+            # Criterios de búsqueda actualizados
             search_criteria = [
-                b'SINCE', date.encode(),
+                date_criteria,
                 b'FROM', b'info@account.netflix.com',
                 b'SUBJECT', b'Tu codigo de acceso temporal de Netflix'
             ]
 
-            logger.info(f"Buscando correos con criterios: {search_criteria}")
+            logger.info(f"Búsqueda - Hora actual: {current_time}, Inicio: {
+                        start_time}, Criterios: {search_criteria}")
 
             _, messages = mail.search(None, *search_criteria)
             if not messages[0]:
@@ -178,9 +190,9 @@ class EmailCodeService:
                                 r'messageGuid=([^&]+)', code_url)
 
                             # Calcular tiempo restante
-                            remaining_seconds = 900 - \
+                            remaining_seconds = 980 - \
                                 (datetime.now(email_date.tzinfo) -
-                                 email_date).total_seconds()
+                                email_date).total_seconds()
                             remaining_minutes = max(
                                 1, int(remaining_seconds / 60))
 
