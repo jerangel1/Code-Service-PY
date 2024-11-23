@@ -40,8 +40,8 @@ class EmailCodeService:
             raise Exception("GMAIL_APP_PASSWORD no está configurado en .env")
 
     def _get_current_time(self) -> datetime:
-        """Obtiene la hora actual en UTC y la convierte a hora de Caracas"""
-        return datetime.now(pytz.UTC).astimezone(self.timezone)
+        """Obtiene la hora actual en UTC"""
+        return datetime.now(pytz.UTC)
 
     def _get_mail_connection(self):
         """Reutiliza la conexión IMAP si está activa"""
@@ -103,19 +103,24 @@ class EmailCodeService:
             if not date_str:
                 return False, None
 
-            # Convertir la fecha del email a la zona horaria de Caracas
+            # Convertir la fecha del email a UTC primero
             email_date = parsedate_to_datetime(date_str)
             if email_date.tzinfo is None:
                 email_date = pytz.UTC.localize(email_date)
-            email_date = email_date.astimezone(self.timezone)
             
+            # Obtener tiempo actual en UTC
             current_time = self._get_current_time()
             
             # Verificar si el correo tiene menos de 15 minutos
             time_difference = current_time - email_date
             is_valid = time_difference.total_seconds() < 900  # 15 minutos
             
-            logger.info(f"Email date: {email_date}, Current time: {current_time}, "
+            # Convertir a zona horaria de Caracas solo para logging
+            caracas_email_date = email_date.astimezone(self.timezone)
+            caracas_current_time = current_time.astimezone(self.timezone)
+            
+            logger.info(f"Email date (Caracas): {caracas_email_date}, "
+                       f"Current time (Caracas): {caracas_current_time}, "
                        f"Difference: {time_difference.total_seconds()} seconds")
             
             return is_valid, email_date
@@ -130,13 +135,13 @@ class EmailCodeService:
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
-            # Buscar correos en los últimos 16 minutos usando hora de Caracas
+            # Buscar correos usando un rango más amplio
             current_time = self._get_current_time()
-            date = (current_time - timedelta(minutes=16)).strftime("%d-%b-%Y")
+            date = (current_time - timedelta(minutes=30)).strftime("%d-%b-%Y")
             search_criteria = (
-                '(SINCE "{}" FROM "info@account.netflix.com" '
-                'SUBJECT "codigo de acceso temporal" LARGER 100)'.format(date)
-            ).encode('utf-8')
+                f'(SINCE "{date}" FROM "info@account.netflix.com" '
+                'SUBJECT "codigo de acceso temporal")'.encode('utf-8')
+            )
 
             _, messages = mail.search(None, search_criteria)
             if not messages[0]:
@@ -144,7 +149,7 @@ class EmailCodeService:
                     "has_code": False,
                     "message": "No se encontraron códigos pendientes",
                     "email": email_address,
-                    "timestamp": self._get_current_time().isoformat()
+                    "timestamp": current_time.astimezone(self.timezone).isoformat()
                 }
 
             # Procesar correos del más reciente al más antiguo
@@ -187,8 +192,7 @@ class EmailCodeService:
                         if 'netflix.com' in code_url:
                             message_guid = re.search(r'messageGuid=([^&]+)', code_url)
 
-                            # Calcular tiempo restante usando hora de Caracas
-                            current_time = self._get_current_time()
+                            # Calcular tiempo restante usando UTC
                             remaining_seconds = 900 - (current_time - email_date).total_seconds()
                             remaining_minutes = max(1, int(remaining_seconds / 60))
 
@@ -200,8 +204,8 @@ class EmailCodeService:
                                 "message": "Código válido encontrado",
                                 "message_guid": message_guid.group(1) if message_guid else None,
                                 "expires_in": f"{remaining_minutes} minutos",
-                                "email_date": email_date.isoformat(),
-                                "timestamp": current_time.isoformat()
+                                "email_date": email_date.astimezone(self.timezone).isoformat(),
+                                "timestamp": current_time.astimezone(self.timezone).isoformat()
                             }
                 except Exception as e:
                     logger.error(f"Error procesando mensaje individual: {str(e)}")
@@ -211,7 +215,7 @@ class EmailCodeService:
                 "has_code": False,
                 "message": "No se encontraron códigos válidos",
                 "email": email_address,
-                "timestamp": self._get_current_time().isoformat()
+                "timestamp": current_time.astimezone(self.timezone).isoformat()
             }
 
         except Exception as e:
@@ -221,6 +225,6 @@ class EmailCodeService:
                 detail={
                     "status": "error",
                     "message": str(e),
-                    "timestamp": self._get_current_time().isoformat()
+                    "timestamp": current_time.astimezone(self.timezone).isoformat()
                 }
             )
