@@ -236,27 +236,29 @@ class EmailCodeService:
                         # 2. Buscar por texto case-insensitive
                         get_code_button = soup.find(
                             'a', string=lambda x: x and 'obtener código' in x.lower())
-                    if not get_code_button:
-                        # 3. Buscar por estilo de Netflix
-                        get_code_button = soup.find(
-                            'a', style=lambda x: x and '#e50914' in x)
-                    if not get_code_button:
-                        # 4. Buscar cualquier enlace que contenga netflix y código
-                        get_code_button = soup.find(
-                            'a', href=lambda x: x and 'netflix.com' in x.lower() and 'codigo' in x.lower())
+                        if not get_code_button:
+                            # 3. Buscar por estilo de Netflix
+                            get_code_button = soup.find(
+                                'a', style=lambda x: x and '#e50914' in x)
+                            if not get_code_button:
+                                # 4. Buscar cualquier enlace que contenga netflix y código
+                                get_code_button = soup.find(
+                                    'a', href=lambda x: x and 'netflix.com' in x.lower() and 'codigo' in x.lower())
 
-                    # Log en una sola línea
-                    logger.info(f"Botón encontrado: {
-                                get_code_button is not None}")
+                                # Log en una sola línea
+                                logger.info(f"Botón encontrado: {
+                                            get_code_button is not None}")
 
                     if get_code_button and (code_url := get_code_button.get('href')):
                         if 'netflix.com' in code_url:
                             logger.info(
                                 f"URL del código encontrada: {code_url}")
 
-                    message_guid = re.search(r'messageGuid=([^&]+)', code_url)
-                    remaining_seconds = self.email_expiry_minutes * 60 - \
-                        (self._get_current_time() - email_date).total_seconds()
+                            message_guid = re.search(
+                                r'messageGuid=([^&]+)', code_url)
+                            remaining_seconds = self.email_expiry_minutes * 60 - \
+                                (self._get_current_time() -
+                                 email_date).total_seconds()
                     remaining_minutes = max(1, int(remaining_seconds / 60))
 
                     return {
