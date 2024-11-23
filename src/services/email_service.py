@@ -118,7 +118,8 @@ class EmailCodeService:
             logger.error(f"Error al procesar fecha: {str(e)}")
             return False, None
 
-async def check_email_for_codes(self, email_address: str) -> dict:
+
+    async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             email_address = email_address.lower()
             logger.info(f"Buscando códigos para: {email_address}")
@@ -176,11 +177,9 @@ async def check_email_for_codes(self, email_address: str) -> dict:
                         continue
 
                     soup = BeautifulSoup(body, 'lxml', from_encoding='utf-8')
-
-                    # Buscar botón de código con más logging
                     logger.info("Buscando botón de código...")
-                    
-                    # Buscar cualquier enlace que contenga la palabra "código" o "code"
+
+                    # Buscar botón de código
                     get_code_button = None
                     for link in soup.find_all('a'):
                         href = link.get('href', '')

@@ -1,33 +1,32 @@
-FROM python:3.11-bookworm
+FROM python:3.11-slim
 
 # Configurar variables de entorno para logging
 ENV PYTHONUNBUFFERED=1
 ENV LOG_LEVEL=DEBUG
+ENV TZ=America/Caracas
 
-RUN apt-get update && \
-    apt-get install -yq tzdata && \
-    ln -fs /usr/share/zoneinfo/America/Caracas /etc/localtime && \
-    dpkg-reconfigure -f noninteractive tzdata
-
-RUN pip install pipenv
+# Actualizar e instalar dependencias necesarias
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    tzdata \
+    && ln -fs /usr/share/zoneinfo/America/Caracas /etc/localtime \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 # Crear y establecer el directorio de trabajo
 WORKDIR /app
 
 # Copiar solo los archivos necesarios primero
 COPY requirements.txt .
-RUN pip install -r requirements.txt
-RUN pip install gunicorn[gevent]
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir gunicorn[gevent]
 
 # Copiar el resto de la aplicación
 COPY . .
 
-# Asegurarse de que los scripts sean ejecutables
-RUN chmod +x start_service.sh
-
 EXPOSE 8000
 
-# Modificar el script de inicio para incluir logging
+# Crear script de inicio
 RUN echo '#!/bin/bash\n\
 echo "Starting service with debug logging..."\n\
 gunicorn main:app \
@@ -37,6 +36,7 @@ gunicorn main:app \
     --log-level debug \
     --access-logfile - \
     --error-logfile - \
-    --capture-output\n' > start_service.sh
+    --capture-output\n' > start_service.sh \
+    && chmod +x start_service.sh
 
 CMD ["bash", "./start_service.sh"]
