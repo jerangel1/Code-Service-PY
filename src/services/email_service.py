@@ -119,7 +119,7 @@ class EmailCodeService:
             date = (datetime.now() - timedelta(minutes=16)).strftime("%d-%b-%Y")
             search_criteria = (
                 '(SINCE "{}" FROM "info@account.netflix.com" '
-                'SUBJECT "codigo de acceso temporal" LARGER 100)'.format(date)
+                'SUBJECT "Tu código de acceso temporal de Netflix" LARGER 100)'.format(date)
             ).encode('utf-8')
 
             _, messages = mail.search(None, search_criteria)
