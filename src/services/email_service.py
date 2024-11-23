@@ -7,6 +7,7 @@ import imaplib
 import email
 import re
 import socket
+import pytz
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from os import getenv
@@ -19,6 +20,7 @@ class EmailCodeService:
     def __init__(self, db: Session):
         self.db = db
         self.code_extractor = CodeExtractor()
+        self.timezone = pytz.timezone('America/Caracas')  # Nueva línea
 
         # Configuración para Gmail central
         self.central_email = "serviciosnetplus@gmail.com"
@@ -35,9 +37,13 @@ class EmailCodeService:
         if not self.central_password:
             raise Exception("GMAIL_APP_PASSWORD no está configurado en .env")
 
+    def _get_current_time(self):
+        """Obtiene la hora actual en la zona horaria de Caracas"""
+        return datetime.now(self.timezone)
+
     def _get_mail_connection(self):
         """Reutiliza la conexión IMAP si está activa"""
-        current_time = datetime.now()
+        current_time = self._get_current_time()
 
         if (self._mail_connection and self._last_connection_time and
                 (current_time - self._last_connection_time).seconds < self._connection_timeout):
@@ -97,7 +103,9 @@ class EmailCodeService:
                 return False, None
 
             email_date = parsedate_to_datetime(date_str)
-            current_time = datetime.now(email_date.tzinfo)
+            if email_date.tzinfo is None:
+                email_date = self.timezone.localize(email_date)
+            current_time = self._get_current_time()
 
             # Verificar si el correo tiene menos de 15 minutos
             time_difference = current_time - email_date
@@ -110,7 +118,6 @@ class EmailCodeService:
             logger.error(f"Error al procesar fecha: {str(e)}")
             return False, None
 
-
     async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             email_address = email_address.lower()
@@ -118,7 +125,7 @@ class EmailCodeService:
             mail.select("INBOX")
 
             # Calcular el rango de tiempo para la búsqueda
-            current_time = datetime.now()
+            current_time = self._get_current_time()
             start_time = current_time - timedelta(minutes=20)   
 
             # Nuevo código de búsqueda simplificado
@@ -133,7 +140,7 @@ class EmailCodeService:
                     "has_code": False,
                     "message": "No se encontraron códigos pendientes",
                     "email": email_address,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": self._get_current_time().isoformat()
                 }
 
             # Procesar correos del más reciente al más antiguo
@@ -177,9 +184,9 @@ class EmailCodeService:
                             message_guid = re.search(
                                 r'messageGuid=([^&]+)', code_url)
 
-                            # Calcular tiempo restante
-                            remaining_seconds = 980 - \
-                                (datetime.now(email_date.tzinfo) -
+                            # Calcular tiempo restante usando la zona horaria correcta
+                            remaining_seconds = 900 - \
+                                (self._get_current_time() -
                                  email_date).total_seconds()
                             remaining_minutes = max(
                                 1, int(remaining_seconds / 60))
@@ -193,7 +200,7 @@ class EmailCodeService:
                                 "message_guid": message_guid.group(1) if message_guid else None,
                                 "expires_in": f"{remaining_minutes} minutos",
                                 "email_date": email_date.isoformat(),
-                                "timestamp": datetime.now().isoformat()
+                                "timestamp": self._get_current_time().isoformat()
                             }
                 except Exception as e:
                     logger.error(
@@ -204,7 +211,7 @@ class EmailCodeService:
                 "has_code": False,
                 "message": "No se encontraron códigos válidos",
                 "email": email_address,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": self._get_current_time().isoformat()
             }
 
         except Exception as e:
@@ -214,6 +221,6 @@ class EmailCodeService:
                 detail={
                     "status": "error",
                     "message": str(e),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": self._get_current_time().isoformat()
                 }
             )
