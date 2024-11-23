@@ -121,22 +121,13 @@ class EmailCodeService:
             current_time = datetime.now()
             start_time = current_time - timedelta(minutes=20)   
 
-            # Manejar el cambio de día
-            if start_time.date() != current_time.date():
-                date_criteria = f'(OR SINCE "{start_time.strftime("%d-%b-%Y")}" SINCE "{current_time.strftime("%d-%b-%Y")}")'.encode()
-            else:
-                date_criteria = f'SINCE "{start_time.strftime("%d-%b-%Y")}"'.encode()
-
-                # Criterios de búsqueda actualizados
-            search_criteria = [
-                date_criteria,
-                b'FROM', b'info@account.netflix.com',
-                b'SUBJECT', b'Tu codigo de acceso temporal de Netflix'
-            ]
+            # Nuevo código de búsqueda simplificado
+            search_date = start_time.strftime("%d-%b-%Y")
+            search_criteria = f'(SINCE "{search_date}" FROM "info@account.netflix.com" SUBJECT "Tu codigo de acceso temporal de Netflix")'.encode()
 
             logger.info(f"Búsqueda - Hora actual: {current_time}, Inicio: {start_time}, Criterios: {search_criteria}")
 
-            _, messages = mail.search(None, *search_criteria)
+            _, messages = mail.search(None, search_criteria)
             if not messages[0]:
                 return {
                     "has_code": False,
