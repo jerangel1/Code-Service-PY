@@ -203,18 +203,19 @@ class EmailCodeService:
                     # 1. Buscar por texto exacto
                     get_code_button = soup.find('a', string='Obtener código')
                     if not get_code_button:
-                        # 2. Buscar por texto case-insensitive y eliminar espacios
+                        # 2. Buscar por texto case-insensitive
                         get_code_button = soup.find(
-                            'a', string=lambda x: x and x.lower().strip() == 'obtener código')
+                            'a', string=lambda x: x and 'obtener código' in x.lower())
                     if not get_code_button:
-                        # 3. Buscar por estilo de Netflix (botón rojo)
+                        # 3. Buscar por estilo de Netflix
                         get_code_button = soup.find(
-                            'a', style=lambda x: x and ('#e50914' in x or 'rgb(229, 9, 20)' in x))
+                            'a', style=lambda x: x and '#e50914' in x)
                     if not get_code_button:
                         # 4. Buscar cualquier enlace que contenga netflix y código
                         get_code_button = soup.find(
-                            'a', href=lambda x: x and 'netflix.com' in x.lower() and ('codigo' in x.lower() or 'code' in x.lower()))
+                            'a', href=lambda x: x and 'netflix.com' in x.lower() and 'codigo' in x.lower())
 
+                    # Corregir el formato del log
                     logger.info(f"Botón encontrado: {
                                 get_code_button is not None}")
 
