@@ -177,7 +177,7 @@ class EmailCodeService:
                             f"Correo no coincide con destinatario: {to_address}")
                         continue
 
-                    if "codigo de acceso temporal" not in subject:
+                    if "Tu código de acceso temporal de Netflix" not in subject:
                         logger.info(f"Asunto no coincide: {subject}")
                         continue
 
@@ -194,7 +194,8 @@ class EmailCodeService:
                         logger.info("Cuerpo del correo vacío")
                         continue
 
-                    soup = BeautifulSoup(body, 'lxml', from_encoding='utf-8')
+                    soup = BeautifulSoup(
+                        body, 'lxml', from_encoding='utf-8')
 
                     # Buscar el botón con múltiples estrategias
                     get_code_button = None
@@ -202,20 +203,20 @@ class EmailCodeService:
                     # 1. Buscar por texto exacto
                     get_code_button = soup.find('a', string='Obtener código')
                     if not get_code_button:
-                        # 2. Buscar por texto case-insensitive
+                        # 2. Buscar por texto case-insensitive y eliminar espacios
                         get_code_button = soup.find(
-                            'a', string=lambda x: x and 'obtener código' in x.lower())
+                            'a', string=lambda x: x and x.lower().strip() == 'obtener código')
                     if not get_code_button:
-                        # 3. Buscar por estilo de Netflix
+                        # 3. Buscar por estilo de Netflix (botón rojo)
                         get_code_button = soup.find(
-                            'a', style=lambda x: x and '#e50914' in x)
+                            'a', style=lambda x: x and ('#e50914' in x or 'rgb(229, 9, 20)' in x))
                     if not get_code_button:
                         # 4. Buscar cualquier enlace que contenga netflix y código
                         get_code_button = soup.find(
-                            'a', href=lambda x: x and 'netflix.com' in x.lower() and 'codigo' in x.lower())
+                            'a', href=lambda x: x and 'netflix.com' in x.lower() and ('codigo' in x.lower() or 'code' in x.lower()))
 
-                    # Corregir esta línea
-                    logger.info(f"Botón encontrado: {get_code_button is not None}")
+                    logger.info(f"Botón encontrado: {
+                                get_code_button is not None}")
 
                     if get_code_button and (code_url := get_code_button.get('href')):
                         if 'netflix.com' in code_url:
