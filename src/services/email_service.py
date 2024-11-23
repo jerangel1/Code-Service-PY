@@ -115,14 +115,19 @@ class EmailCodeService:
             mail = self._get_mail_connection()
             mail.select("INBOX")
 
-            # Buscar correos en los últimos 16 minutos (margen extra)
+            # Modificar la construcción del criterio de búsqueda
             date = (datetime.now() - timedelta(minutes=16)).strftime("%d-%b-%Y")
-            search_criteria = (
-                '(SINCE "{}" FROM "info@account.netflix.com" '
-                'SUBJECT "Tu código de acceso temporal de Netflix" LARGER 100)'.format(date)
-            ).encode('utf-8')
 
-            _, messages = mail.search(None, search_criteria)
+            # Separar los criterios de búsqueda
+            search_criteria = [
+                b'SINCE', date.encode(),
+                b'FROM', b'info@account.netflix.com',
+                b'SUBJECT', b'Tu codigo de acceso temporal de Netflix'
+            ]
+
+            logger.info(f"Buscando correos con criterios: {search_criteria}")
+
+            _, messages = mail.search(None, *search_criteria)
             if not messages[0]:
                 return {
                     "has_code": False,
