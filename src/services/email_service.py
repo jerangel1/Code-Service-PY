@@ -15,12 +15,11 @@ from src.services.code_extractor import CodeExtractor
 
 logger = logging.getLogger(__name__)
 
-
 class EmailCodeService:
     def __init__(self, db: Session):
         self.db = db
         self.code_extractor = CodeExtractor()
-        self.timezone = pytz.timezone('America/Caracas')  # Nueva línea
+        self.timezone = pytz.timezone('America/Caracas')
 
         # Configuración para Gmail central
         self.central_email = "serviciosnetplus@gmail.com"
@@ -118,7 +117,6 @@ class EmailCodeService:
             logger.error(f"Error al procesar fecha: {str(e)}")
             return False, None
 
-
     async def check_email_for_codes(self, email_address: str) -> dict:
         try:
             email_address = email_address.lower()
@@ -134,6 +132,9 @@ class EmailCodeService:
             # Búsqueda simplificada
             search_date = start_time.strftime("%d-%b-%Y")
             search_criteria = f'(SINCE "{search_date}" FROM "info@account.netflix.com")'.encode()
+
+            # Agregar búsqueda para "Cómo actualizar tu hogar con Netflix"
+            search_criteria_update = f'(SINCE "{search_date}" FROM "info@account.netflix.com" SUBJECT "Cómo actualizar tu hogar con Netflix")'.encode()
 
             logger.info(f"Búsqueda - Hora actual: {current_time}, Inicio: {start_time}, Criterios: {search_criteria}")
 
@@ -192,6 +193,12 @@ class EmailCodeService:
                             ('codigo' in text or 'code' in text or 
                              'obtener' in text or 'get' in text or 
                              '#e50914' in style)):
+                            get_code_button = link
+                            break
+
+                        # Nueva condición para el caso de "Cómo actualizar tu hogar con Netflix"
+                        if ('netflix.com' in href and 
+                            ('actualizar' in text or 'update' in text)):
                             get_code_button = link
                             break
 
