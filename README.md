@@ -13,6 +13,17 @@
 * **Soporte Multi-Plataforma:** Adaptabilidad para futuras pasarelas de suscripción.
 
 ## 📂 Estructura del Proyecto
+Code-Service-PY/
+```├── src/                # Código fuente del proyecto
+│   ├── main.py         # Script principal para ejecutar la aplicación
+│   ├── api/            # Módulos relacionados con la API
+│   └── utils/          # Funciones auxiliares y herramientas
+├── tests/              # Pruebas unitarias y de integración
+├── .env.example        # Ejemplo de configuración de variables de entorno
+├── requirements.txt    # Dependencias del proyecto
+├── Dockerfile          # Configuración para contenedores Docker
+└── README.md           # Documentación del proyecto
+```
 
 ## 🛠 Tecnologías Utilizadas
 
