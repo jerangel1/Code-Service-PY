@@ -1,6 +1,7 @@
 # Code Service PY
 
 [![Licencia MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker Compose](https://img.shields.io/badge/Docker%20Compose-v3.8-blue)](https://docs.docker.com/compose/)
 
 **Code Service PY** es un proyecto gratuito diseñado para extraer códigos de suscripciones y enviarlos a través de una API. Este sistema facilita la autorización de códigos para diversas pasarelas, incluyendo Netflix, Disney+, HBO y otros servicios similares.
 
@@ -10,6 +11,8 @@
 * **Envío mediante API:** Integración sencilla con otros sistemas.
 * **Gestión de autorizaciones:** Específicamente diseñado para servicios de streaming como Netflix, Disney+, HBO, entre otros.
 * **Soporte Multi-Plataforma:** Adaptabilidad para futuras pasarelas de suscripción.
+
+## 📂 Estructura del Proyecto
 
 ## 🛠 Tecnologías Utilizadas
 
