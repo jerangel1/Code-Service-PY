@@ -21,6 +21,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir gunicorn[gevent]
 
+# Instalar dependencias de desarrollo para linting y testing
+RUN pip install --no-cache-dir pytest black flake8 pylint
+
 # Copiar el resto de la aplicación
 COPY . .
 

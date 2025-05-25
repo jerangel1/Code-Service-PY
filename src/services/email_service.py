@@ -170,6 +170,9 @@ class EmailCodeService:
                     if not is_valid:
                         logger.info(f"Correo expirado para {email_address}")
                         continue
+                        
+                    # Agregar atributo para rastrear el tipo de código
+                    email_message.code_type = "netflix_code"
 
                     # Procesar cuerpo del correo
                     body = self._get_email_body(email_message)
@@ -201,6 +204,15 @@ class EmailCodeService:
                             ('actualizar' in text or 'update' in text)):
                             get_code_button = link
                             break
+                            
+                        # Condición para detectar el botón "Sí, la envié yo" en emails de actualización de hogar
+                        if ('netflix.com' in href and
+                            ('sí, la envié yo' in text.lower() or 'si, la envie yo' in text.lower())):
+                            logger.info(f"Botón de confirmación de actualización de hogar encontrado: {text}")
+                            get_code_button = link
+                            # Marcar como tipo de código de hogar
+                            email_message.code_type = "netflix_home_update"
+                            break
 
                     if get_code_button and (code_url := get_code_button.get('href')):
                         logger.info(f"URL del código encontrada: {code_url}")
@@ -212,12 +224,17 @@ class EmailCodeService:
                             remaining_seconds = 900 - (self._get_current_time() - email_date).total_seconds()
                             remaining_minutes = max(1, int(remaining_seconds / 60))
 
+                            code_type = getattr(email_message, 'code_type', "netflix_code")
+                            message_text = "Código válido encontrado"
+                            if code_type == "netflix_home_update":
+                                message_text = "Confirmación de actualización de hogar encontrada"
+                                
                             return {
                                 "has_code": True,
                                 "code_url": code_url,
                                 "email": email_address,
-                                "type": "netflix_code",
-                                "message": "Código válido encontrado",
+                                "type": code_type,
+                                "message": message_text,
                                 "message_guid": message_guid.group(1) if message_guid else None,
                                 "expires_in": f"{remaining_minutes} minutos",
                                 "email_date": email_date.isoformat(),
